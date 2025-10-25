@@ -41,7 +41,7 @@ create policy "profiles_update_own"
   using (id = (select auth.uid()))
   with check (id = (select auth.uid()));
 
--- (Optional) DELETE own profile — usually unnecessary, omit unless you support delete
+-- (Optional) DELETE own profile — usually unnecessary
 -- create policy "profiles_delete_own"
 --   on public.profiles
 --   as permissive
@@ -198,82 +198,6 @@ create policy "cost_update_own"
 
 create policy "cost_delete_own"
   on public.cost_items
-  as permissive
-  for delete
-  to authenticated
-  using (user_id = (select auth.uid()));
-
--- ---------- LABOR LOGS ----------
-alter table public.labor_logs enable row level security;
-
-drop policy if exists "labor is owner" on public.labor_logs;
-drop policy if exists "labor sel own" on public.labor_logs;
-drop policy if exists "labor ins own" on public.labor_logs;
-drop policy if exists "labor upd own" on public.labor_logs;
-drop policy if exists "labor del own" on public.labor_logs;
-
-create policy "labor_select_own"
-  on public.labor_logs
-  as permissive
-  for select
-  to authenticated
-  using (user_id = (select auth.uid()));
-
-create policy "labor_insert_own"
-  on public.labor_logs
-  as permissive
-  for insert
-  to authenticated
-  with check (user_id = (select auth.uid()));
-
-create policy "labor_update_own"
-  on public.labor_logs
-  as permissive
-  for update
-  to authenticated
-  using (user_id = (select auth.uid()))
-  with check (user_id = (select auth.uid()));
-
-create policy "labor_delete_own"
-  on public.labor_logs
-  as permissive
-  for delete
-  to authenticated
-  using (user_id = (select auth.uid()));
-
--- ---------- ENVIRONMENT LOGS ----------
-alter table public.environment_logs enable row level security;
-
-drop policy if exists "env is owner" on public.environment_logs;
-drop policy if exists "env sel own" on public.environment_logs;
-drop policy if exists "env ins own" on public.environment_logs;
-drop policy if exists "env upd own" on public.environment_logs;
-drop policy if exists "env del own" on public.environment_logs;
-
-create policy "env_select_own"
-  on public.environment_logs
-  as permissive
-  for select
-  to authenticated
-  using (user_id = (select auth.uid()));
-
-create policy "env_insert_own"
-  on public.environment_logs
-  as permissive
-  for insert
-  to authenticated
-  with check (user_id = (select auth.uid()));
-
-create policy "env_update_own"
-  on public.environment_logs
-  as permissive
-  for update
-  to authenticated
-  using (user_id = (select auth.uid()))
-  with check (user_id = (select auth.uid()));
-
-create policy "env_delete_own"
-  on public.environment_logs
   as permissive
   for delete
   to authenticated
