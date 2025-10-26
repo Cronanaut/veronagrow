@@ -1,5 +1,11 @@
-import supabase from './supabase-client';
+// src/utils/supabase/index.ts
+// Compatibility layer so existing imports keep working.
+// - default export: client (for client components)
+// - named { supabase }: same client
+// - named { createClient }: returns the same client (legacy callers)
+// If you need server-side usage, import from '@/utils/supabase/server'.
+import client from './client';
 
-export default supabase;                 // allows: import supabase from '@/utils/supabase'
-export { supabase };                     // allows: import { supabase } from '@/utils/supabase'
-export const createClient = () => supabase; // allows: import { createClient } from '@/utils/supabase'
+export default client;
+export { default as supabase } from './client';
+export const createClient = () => client;

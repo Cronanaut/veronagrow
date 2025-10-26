@@ -1,109 +1,253 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 export type Lot = {
   id: string;
-  qty: number;
-  unit_cost: number | null;
   lot_code: string | null;
+  quantity: number;
+  unit_cost: number | null;
   received_at: string | null;
   created_at: string | null;
 };
 
-export default function LotsCard({
-  lots,
-  onAddLot,
-}: {
-  lots: Lot[];
-  onAddLot: (input: {
-    lot_code?: string;
-    quantity: number;
-    received_at?: string | null;
-    unit_cost?: number | null;
-  }) => Promise<void>;
-}) {
-  const [qty, setQty] = useState<number>(0);
-  const [code, setCode] = useState<string>('');
-  const [cost, setCost] = useState<string>('');
-  const [date, setDate] = useState<string>('');
-  const [saving, setSaving] = useState(false);
+type AddInput = {
+  lot_code?: string;
+  quantity: number;
+  received_at?: string | null;
+  unit_cost?: number | null;
+};
 
-  async function add() {
-    setSaving(true);
-    await onAddLot({
-      lot_code: code || undefined,
-      quantity: qty,
-      unit_cost: cost ? Number(cost) : null,
-      received_at: date || null,
-    });
-    setQty(0);
-    setCode('');
-    setCost('');
-    setDate('');
-    setSaving(false);
+type Patch = {
+  lot_code?: string | null;
+  quantity?: number;
+  received_at?: string | null;
+  unit_cost?: number | null;
+};
+
+type Props = {
+  lots: Lot[];
+  onAddLot: (input: AddInput) => Promise<void>;
+  onUpdateLot: (lotId: string, patch: Patch) => Promise<void>;
+};
+
+export default function LotsCard({ lots, onAddLot, onUpdateLot }: Props) {
+  const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState<AddInput>({
+    lot_code: today,
+    quantity: 0,
+    received_at: today,
+    unit_cost: null,
+  });
+
+  async function submitAdd(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.quantity || form.quantity <= 0) {
+      alert('Enter a quantity > 0');
+      return;
+    }
+    await onAddLot(form);
+    setForm({ lot_code: today, quantity: 0, received_at: today, unit_cost: null });
+    setAdding(false);
   }
 
   return (
-    <div className="rounded-2xl border p-5 space-y-4">
-      <h2 className="text-xl font-semibold">Lots</h2>
-
-      <div className="flex gap-3 items-end">
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Quantity</span>
-          <input
-            type="number"
-            className="rounded border bg-black p-2"
-            value={qty}
-            onChange={(e) => setQty(Number(e.target.value))}
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Lot code</span>
-          <input
-            className="rounded border bg-black p-2"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Unit cost</span>
-          <input
-            type="number"
-            step="0.01"
-            className="rounded border bg-black p-2"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-          />
-        </label>
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Received</span>
-          <input
-            type="date"
-            className="rounded border bg-black p-2"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
-        </label>
-        <button className="rounded bg-white text-black px-4 py-2 disabled:opacity-60" onClick={add} disabled={saving}>
-          {saving ? 'Adding…' : 'Add lot'}
+    <div className="rounded-2xl border p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-lg font-semibold">Lots</h3>
+        <button
+          onClick={() => setAdding((v) => !v)}
+          className="rounded-md border px-3 py-1 text-sm"
+        >
+          {adding ? 'Cancel' : 'Add Lot'}
         </button>
       </div>
 
-      <div className="divide-y divide-neutral-800 rounded border">
-        {lots.length === 0 ? (
-          <div className="p-3 text-neutral-400">No lots yet.</div>
-        ) : (
-          lots.map((l) => (
-            <div key={l.id} className="p-3 flex gap-6 items-center">
-              <div className="w-28">{l.qty}</div>
-              <div className="w-40">{l.lot_code ?? '—'}</div>
-              <div className="w-40">{l.unit_cost != null ? `$${l.unit_cost.toFixed(2)}` : '—'}</div>
-              <div className="flex-1">{l.received_at ? new Date(l.received_at).toLocaleDateString() : '—'}</div>
-            </div>
-          ))
-        )}
+      {adding && (
+        <form onSubmit={submitAdd} className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid gap-1">
+            <label className="text-xs text-neutral-500">Lot Code</label>
+            <input
+              className="rounded-md border px-3 py-2"
+              value={form.lot_code ?? ''}
+              onChange={(e) => setForm((s) => ({ ...s, lot_code: e.target.value }))}
+            />
+          </div>
+
+          <div className="grid gap-1">
+            <label className="text-xs text-neutral-500">Quantity</label>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              className="rounded-md border px-3 py-2"
+              value={form.quantity}
+              onChange={(e) => setForm((s) => ({ ...s, quantity: Number(e.target.value) }))}
+              required
+            />
+          </div>
+
+          <div className="grid gap-1">
+            <label className="text-xs text-neutral-500">Unit Cost</label>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              className="rounded-md border px-3 py-2"
+              value={form.unit_cost ?? ''}
+              onChange={(e) =>
+                setForm((s) => ({
+                  ...s,
+                  unit_cost: e.target.value === '' ? null : Number(e.target.value),
+                }))
+              }
+            />
+          </div>
+
+          <div className="grid gap-1">
+            <label className="text-xs text-neutral-500">Received</label>
+            <input
+              type="date"
+              className="rounded-md border px-3 py-2"
+              value={form.received_at ?? ''}
+              onChange={(e) => setForm((s) => ({ ...s, received_at: e.target.value }))}
+            />
+          </div>
+
+          <div className="md:col-span-4 flex justify-end">
+            <button className="rounded-md border px-4 py-2">Save Lot</button>
+          </div>
+        </form>
+      )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-neutral-500">
+            <tr>
+              <th className="py-2 pr-2">Lot</th>
+              <th className="py-2 pr-2">Quantity</th>
+              <th className="py-2 pr-2">Unit Cost</th>
+              <th className="py-2 pr-2">Received</th>
+              <th className="py-2 pr-2"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {lots.map((lot) => (
+              <Row key={lot.id} lot={lot} onUpdateLot={onUpdateLot} />
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
+  );
+}
+
+function Row({
+  lot,
+  onUpdateLot,
+}: {
+  lot: Lot;
+  onUpdateLot: (lotId: string, patch: { lot_code?: string | null; quantity?: number; received_at?: string | null; unit_cost?: number | null }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({
+    lot_code: lot.lot_code ?? '',
+    quantity: lot.quantity,
+    unit_cost: lot.unit_cost ?? null,
+    received_at: lot.received_at ?? '',
+  });
+
+  async function save() {
+    await onUpdateLot(lot.id, {
+      lot_code: draft.lot_code,
+      quantity: draft.quantity,
+      unit_cost: draft.unit_cost,
+      received_at: draft.received_at || null,
+    });
+    setEditing(false);
+  }
+
+  return (
+    <tr className="border-t">
+      <td className="py-2 pr-2">
+        {editing ? (
+          <input
+            className="rounded-md border px-2 py-1 w-full"
+            value={draft.lot_code ?? ''}
+            onChange={(e) => setDraft((s) => ({ ...s, lot_code: e.target.value }))}
+          />
+        ) : (
+          lot.lot_code || '—'
+        )}
+      </td>
+      <td className="py-2 pr-2">
+        {editing ? (
+          <input
+            type="number"
+            min={0}
+            step="any"
+            className="rounded-md border px-2 py-1 w-full"
+            value={draft.quantity}
+            onChange={(e) => setDraft((s) => ({ ...s, quantity: Number(e.target.value) }))}
+          />
+        ) : (
+          lot.quantity
+        )}
+      </td>
+      <td className="py-2 pr-2">{editing ? (
+        <input
+          type="number"
+          min={0}
+          step="any"
+          className="rounded-md border px-2 py-1 w-full"
+          value={draft.unit_cost ?? ''}
+          onChange={(e) =>
+            setDraft((s) => ({
+              ...s,
+              unit_cost: e.target.value === '' ? null : Number(e.target.value),
+            }))
+          }
+        />
+      ) : (
+        lot.unit_cost != null ? `$${Number(lot.unit_cost).toFixed(2)}` : '—'
+      )}</td>
+      <td className="py-2 pr-2">
+        {editing ? (
+          <input
+            type="date"
+            className="rounded-md border px-2 py-1 w-full"
+            value={draft.received_at ?? ''}
+            onChange={(e) => setDraft((s) => ({ ...s, received_at: e.target.value }))}
+          />
+        ) : (
+          lot.received_at ?? '—'
+        )}
+      </td>
+      <td className="py-2 pr-2 text-right">
+        <button
+          className="rounded-md border px-2 py-1 text-xs"
+          onClick={() => (editing ? save() : setEditing(true))}
+        >
+          {editing ? 'Save' : '✏️ Edit'}
+        </button>
+        {editing && (
+          <button
+            className="ml-2 rounded-md border px-2 py-1 text-xs"
+            onClick={() => {
+              setEditing(false);
+              setDraft({
+                lot_code: lot.lot_code ?? '',
+                quantity: lot.quantity,
+                unit_cost: lot.unit_cost ?? null,
+                received_at: lot.received_at ?? '',
+              });
+            }}
+          >
+            Cancel
+          </button>
+        )}
+      </td>
+    </tr>
   );
 }

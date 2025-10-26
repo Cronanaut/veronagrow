@@ -1,105 +1,92 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 
 export type InventoryItem = {
   id: string;
   name: string;
-  quantity: number;
   unit: string;
-  price_per_unit: number;
-  category?: string;
+  category: string;
+  // Read-only display; calculated from lots
+  unit_cost: number | null;
 };
 
-export default function ItemForm({
-  item,
-  onSave,
-}: {
+type Props = {
   item: InventoryItem;
-  onSave: (updates: Partial<InventoryItem>) => Promise<void>;
-}) {
-  const [form, setForm] = useState<InventoryItem>(item);
+  onSave: (updates: { name?: string; unit?: string; category?: string }) => Promise<void>;
+};
+
+export default function ItemForm({ item, onSave }: Props) {
+  const [name, setName] = useState(item.name ?? '');
+  const [unit, setUnit] = useState(item.unit ?? '');
+  const [category, setCategory] = useState(item.category ?? '');
   const [saving, setSaving] = useState(false);
 
-  function set<K extends keyof InventoryItem>(key: K, v: InventoryItem[K]) {
-    setForm((f) => ({ ...f, [key]: v }));
-  }
-
-  async function handleSave() {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     setSaving(true);
-    await onSave({
-      name: form.name,
-      qty: form.quantity as unknown as number,
-      unit: form.unit,
-      unit_cost: form.price_per_unit as unknown as number,
-      category: form.category,
-    } as unknown as Partial<InventoryItem>);
-    setSaving(false);
+    try {
+      await onSave({
+        name: name.trim(),
+        unit: unit.trim(),
+        category: category.trim(),
+      });
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div className="rounded-2xl border p-5 space-y-4">
-      <h2 className="text-xl font-semibold">Edit item</h2>
-
-      <div className="grid grid-cols-2 gap-4">
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Name</span>
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <label className="flex flex-col gap-1">
+          <span className="text-sm text-neutral-500">Name</span>
           <input
-            className="w-full rounded border bg-black p-2"
-            value={form.name}
-            onChange={(e) => set('name', e.target.value)}
+            className="rounded-md border px-3 py-2"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="e.g. Part A Nutrient"
           />
         </label>
 
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Category</span>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm text-neutral-500">Unit of Measure</span>
           <input
-            className="w-full rounded border bg-black p-2"
-            value={form.category ?? ''}
-            onChange={(e) => set('category', e.target.value)}
+            className="rounded-md border px-3 py-2"
+            value={unit}
+            onChange={(e) => setUnit(e.target.value)}
+            placeholder="e.g. mL, g, oz"
           />
         </label>
 
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Quantity</span>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm text-neutral-500">Category</span>
           <input
-            type="number"
-            className="w-full rounded border bg-black p-2"
-            value={form.quantity}
-            onChange={(e) => set('quantity', Number(e.target.value))}
+            className="rounded-md border px-3 py-2"
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            placeholder="e.g. Nutrient"
           />
         </label>
 
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Unit</span>
-          <input
-            className="w-full rounded border bg-black p-2"
-            value={form.unit}
-            onChange={(e) => set('unit', e.target.value)}
-          />
-        </label>
-
-        <label className="space-y-1 col-span-2">
-          <span className="text-sm text-neutral-400">Price per Unit</span>
-          <input
-            type="number"
-            step="0.01"
-            className="w-full rounded border bg-black p-2"
-            value={form.price_per_unit}
-            onChange={(e) => set('price_per_unit', Number(e.target.value))}
-          />
-        </label>
+        {/* Read-only price per unit (driven by lots) */}
+        <div className="flex flex-col gap-1">
+          <span className="text-sm text-neutral-500">Price / Unit</span>
+          <div className="rounded-md border px-3 py-2 bg-neutral-50">
+            {item.unit_cost != null ? `$${Number(item.unit_cost).toFixed(2)}` : '—'}
+          </div>
+        </div>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex items-center gap-3 pt-2">
         <button
-          className="rounded bg-white text-black px-4 py-2 disabled:opacity-60"
-          onClick={handleSave}
+          type="submit"
           disabled={saving}
+          className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
         >
-          {saving ? 'Saving…' : 'Save'}
+          {saving ? 'Saving…' : 'Save changes'}
         </button>
       </div>
-    </div>
+    </form>
   );
 }

@@ -1,161 +1,119 @@
 'use client';
 
-// src/app/(app)/inventory/new/page.tsx
-import { FormEvent, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { supabase } from '@/utils/supabase';
-import RequireAuth from '@/components/RequireAuth';
+import supabase from '@/utils/supabase';
 
 export default function NewInventoryItemPage() {
   const router = useRouter();
-  const [submitting, setSubmitting] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [userReady, setUserReady] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
 
-  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+  const [name, setName] = useState('');
+  const [category, setCategory] = useState('');
+  const [unit, setUnit] = useState('');
+
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      const uid = data.session?.user?.id ?? null;
+      setUserId(uid);
+      setUserReady(true);
+      if (!uid) router.push('/signin');
+    });
+    return () => { mounted = false; };
+  }, [router]);
+
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
-    setSubmitting(true);
+    if (!userId) return;
+    setSaving(true);
+    setError(null);
 
-    const form = new FormData(e.currentTarget);
-    const name = String(form.get('name') ?? '').trim();
-    const qty = Number(String(form.get('qty') ?? '0'));
-    const unit = String(form.get('unit') ?? '').trim();
-    const unit_cost = Number(String(form.get('unit_cost') ?? '0'));
-    const category = String(form.get('category') ?? '').trim() || null;
+    const { data, error } = await supabase
+      .from('inventory_items')
+      .insert({
+        user_id: userId,
+        name: name.trim(),
+        category: category.trim() || null,
+        unit: unit.trim() || null,
+        qty: 0,            // start at 0 — will grow via Lots & Usages
+        unit_cost: null,   // derived from latest lot, not entered here
+      })
+      .select('id')
+      .single();
 
-    try {
-      // Must be logged in for RLS
-      const { data: userData } = await supabase.auth.getUser();
-      if (!userData?.user) {
-        router.push('/signin');
-        return;
-      }
-
-      const { error } = await supabase.from('inventory_items').insert({
-        name,
-        qty,
-        unit,
-        unit_cost,
-        category,
-        user_id: userData.user.id,
-      });
-
-      if (error) throw error;
-
-      // Go back to list
-      router.push('/inventory');
-    } catch (e: unknown) {
-      // ESLint-friendly error handling
-      let message = 'Failed to create item';
-      if (e instanceof Error) {
-        message = e.message;
-      } else {
-        try {
-          message = String(e);
-        } catch {
-          // keep default
-        }
-      }
-      console.error(e);
-      setErr(message);
-      setSubmitting(false);
+    if (error) {
+      setError(error.message);
+      setSaving(false);
+      return;
     }
+    router.push(`/inventory/${data!.id}`);
   }
 
-  return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <RequireAuth />
+  if (!userReady) return null;
 
+  return (
+    <div className="max-w-2xl mx-auto space-y-8 p-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">New Inventory Item</h1>
-        <Link href="/inventory" className="text-sm underline">
-          Back to inventory
-        </Link>
+        <Link href="/inventory" className="underline">Back to inventory</Link>
       </div>
 
-      <form onSubmit={onSubmit} className="rounded-2xl border p-5 space-y-5">
-        {err && (
-          <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-red-700 text-sm">
-            {err}
-          </div>
-        )}
+      {error && (
+        <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-red-200">
+          {error}
+        </div>
+      )}
 
+      <form onSubmit={handleSubmit} className="space-y-5 rounded-2xl border p-5">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Name */}
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Name *</span>
+          <label className="space-y-1 md:col-span-2">
+            <div className="text-sm text-neutral-400">Name *</div>
             <input
               required
-              name="name"
+              className="w-full rounded-md border bg-transparent p-2"
               placeholder="e.g., Coco, Dirt, Jacks Part A"
-              className="rounded-lg border px-3 py-2"
-              defaultValue=""
+              value={name}
+              onChange={(e) => setName(e.target.value)}
             />
           </label>
 
-          {/* Category */}
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Category</span>
+          <label className="space-y-1">
+            <div className="text-sm text-neutral-400">Category</div>
             <input
-              name="category"
+              className="w-full rounded-md border bg-transparent p-2"
               placeholder="e.g., media, nutrient, pesticide"
-              className="rounded-lg border px-3 py-2"
-              defaultValue=""
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
             />
           </label>
 
-          {/* Quantity */}
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Quantity</span>
+          <label className="space-y-1">
+            <div className="text-sm text-neutral-400">Unit</div>
             <input
-              name="qty"
-              type="number"
-              step="0.01"
-              placeholder="0"
-              className="rounded-lg border px-3 py-2"
-              defaultValue={0}
-            />
-          </label>
-
-          {/* Unit */}
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Unit</span>
-            <input
-              name="unit"
+              className="w-full rounded-md border bg-transparent p-2"
               placeholder="e.g., lbs, kg, gal"
-              className="rounded-lg border px-3 py-2"
-              defaultValue=""
-            />
-          </label>
-
-          {/* Unit Cost */}
-          <label className="flex flex-col gap-1 md:col-span-2">
-            <span className="text-sm font-medium">Price per Unit</span>
-            <input
-              name="unit_cost"
-              type="number"
-              step="0.01"
-              placeholder="0.00"
-              className="rounded-lg border px-3 py-2"
-              defaultValue={0}
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
             />
           </label>
         </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-3">
+        <div className="flex gap-2">
           <button
             type="submit"
-            disabled={submitting}
-            className="rounded-xl bg-black px-4 py-2 text-white hover:opacity-90 disabled:opacity-50"
+            disabled={saving}
+            className="rounded-md border px-4 py-2"
           >
-            {submitting ? 'Saving…' : 'Save'}
+            {saving ? 'Creating…' : 'Create'}
           </button>
-          <Link
-            href="/inventory"
-            className="rounded-xl border px-4 py-2 hover:bg-gray-50"
-          >
+          <Link href="/inventory" className="rounded-md border px-4 py-2">
             Cancel
           </Link>
         </div>

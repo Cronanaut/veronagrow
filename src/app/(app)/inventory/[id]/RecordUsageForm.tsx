@@ -4,10 +4,7 @@ import { useState } from 'react';
 
 type Plant = { id: string; name: string | null };
 
-export default function RecordUsageForm({
-  plants,
-  onRecord,
-}: {
+type Props = {
   plants: Plant[];
   onRecord: (input: {
     plant_batch_id: string;
@@ -15,87 +12,94 @@ export default function RecordUsageForm({
     note?: string;
     used_at?: string;
   }) => Promise<void>;
-}) {
-  const [plantId, setPlantId] = useState<string>(plants[0]?.id ?? '');
-  const [qty, setQty] = useState<number>(0);
-  const [note, setNote] = useState<string>('');
+};
+
+export default function RecordUsageForm({ plants, onRecord }: Props) {
+  const [plantId, setPlantId] = useState<string>('');
+  const [qty, setQty] = useState<string>('0');
   const [date, setDate] = useState<string>('');
+  const [note, setNote] = useState<string>('');
   const [saving, setSaving] = useState(false);
 
-  async function submit() {
-    if (!plantId || qty <= 0) {
-      alert('Choose a plant and a quantity > 0');
-      return;
-    }
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const n = Number(qty);
+    if (!plantId || !Number.isFinite(n) || n <= 0) return;
+
     setSaving(true);
-    await onRecord({
-      plant_batch_id: plantId,
-      quantity: qty,
-      note: note || undefined,
-      used_at: date || undefined,
-    });
-    setQty(0);
-    setNote('');
-    setDate('');
-    setSaving(false);
+    try {
+      await onRecord({
+        plant_batch_id: plantId,
+        quantity: n,
+        note: note || undefined,
+        used_at: date || undefined,
+      });
+      // reset
+      setQty('0');
+      setDate('');
+      setNote('');
+      setPlantId('');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="rounded-2xl border p-5 space-y-4">
-      <h2 className="text-xl font-semibold">Record usage</h2>
-      <div className="flex flex-wrap gap-3 items-end">
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Plant</span>
+      <h2 className="text-xl font-semibold">Record Usage</h2>
+
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <select
-            className="rounded border bg-black p-2 min-w-56"
             value={plantId}
             onChange={(e) => setPlantId(e.target.value)}
+            className="col-span-1 md:col-span-1 rounded-md border bg-transparent p-2"
+            aria-label="Plant"
           >
+            <option value="">Select a plant…</option>
             {plants.map((p) => (
               <option key={p.id} value={p.id}>
-                {p.name ?? p.id}
+                {p.name ?? 'Untitled plant'}
               </option>
             ))}
           </select>
-        </label>
 
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Quantity</span>
           <input
             type="number"
-            className="rounded border bg-black p-2"
+            inputMode="decimal"
             value={qty}
-            onChange={(e) => setQty(Number(e.target.value))}
+            onChange={(e) => setQty(e.target.value)}
+            className="rounded-md border bg-transparent p-2"
+            placeholder="Quantity"
+            aria-label="Quantity"
+            min="0"
           />
-        </label>
 
-        <label className="space-y-1">
-          <span className="text-sm text-neutral-400">Date (optional)</span>
           <input
             type="date"
-            className="rounded border bg-black p-2"
             value={date}
             onChange={(e) => setDate(e.target.value)}
+            className="rounded-md border bg-transparent p-2"
+            aria-label="Date (optional)"
           />
-        </label>
 
-        <label className="flex-1 space-y-1 min-w-64">
-          <span className="text-sm text-neutral-400">Note (optional)</span>
-          <input
-            className="w-full rounded border bg-black p-2"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </label>
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-md border px-3 py-2 disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Record usage'}
+          </button>
+        </div>
 
-        <button
-          className="rounded bg-white text-black px-4 py-2 disabled:opacity-60"
-          onClick={submit}
-          disabled={saving}
-        >
-          {saving ? 'Saving…' : 'Record usage'}
-        </button>
-      </div>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          className="w-full rounded-md border bg-transparent p-2"
+          placeholder="Note (optional)"
+          rows={3}
+        />
+      </form>
     </div>
   );
 }

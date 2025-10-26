@@ -1,8 +1,17 @@
--- Make unit_cost optional since price comes from latest lot
-alter table public.inventory_items
-  alter column unit_cost drop not null,
-  alter column unit_cost drop default;
+-- 20251026224500_items_unit_cost_nullable.sql
+-- Make inventory_items.unit_cost nullable, safely (only if currently NOT NULL)
 
--- Ensure qty defaults to 0 for new items (so we can omit it at create)
-alter table public.inventory_items
-  alter column qty set default 0;
+do $$
+begin
+  if exists (
+    select 1
+    from information_schema.columns
+    where table_schema = 'public'
+      and table_name   = 'inventory_items'
+      and column_name  = 'unit_cost'
+      and is_nullable  = 'NO'
+  ) then
+    alter table public.inventory_items
+      alter column unit_cost drop not null;
+  end if;
+end$$;
