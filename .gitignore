@@ -39,3 +39,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+# Node / Next
+.next/
+node_modules/
+*.log
+
+# Env (do NOT commit secrets)
+.env
+.env.* 
+!.env.example   # keep a redacted template
+
+# Supabase local artifacts
+supabase/.temp
+supabase/.branches

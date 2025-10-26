@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, FormEvent } from 'react';
+import { useState } from 'react';
 
 export type InventoryItem = {
   id: string;
@@ -8,109 +8,98 @@ export type InventoryItem = {
   quantity: number;
   unit: string;
   price_per_unit: number;
+  category?: string;
 };
 
-type Props = {
+export default function ItemForm({
+  item,
+  onSave,
+}: {
   item: InventoryItem;
   onSave: (updates: Partial<InventoryItem>) => Promise<void>;
-};
-
-export default function ItemForm({ item, onSave }: Props) {
-  const [name, setName] = useState(item.name);
-  const [quantity, setQuantity] = useState<number>(item.quantity);
-  const [unit, setUnit] = useState(item.unit);
-  const [pricePerUnit, setPricePerUnit] = useState<number>(item.price_per_unit);
+}) {
+  const [form, setForm] = useState<InventoryItem>(item);
   const [saving, setSaving] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
 
-  const changed = useMemo(() => {
-    return (
-      name !== item.name ||
-      quantity !== item.quantity ||
-      unit !== item.unit ||
-      pricePerUnit !== item.price_per_unit
-    );
-  }, [name, quantity, unit, pricePerUnit, item]);
+  function set<K extends keyof InventoryItem>(key: K, v: InventoryItem[K]) {
+    setForm((f) => ({ ...f, [key]: v }));
+  }
 
-  async function handleSave(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (!changed) return;
+  async function handleSave() {
     setSaving(true);
-    setMsg(null);
-    try {
-      await onSave({
-        name,
-        quantity,
-        unit,
-        price_per_unit: pricePerUnit,
-      });
-      setMsg('Saved.');
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Save failed';
-      setMsg(message);
-    } finally {
-      setSaving(false);
-    }
+    await onSave({
+      name: form.name,
+      qty: form.quantity as unknown as number,
+      unit: form.unit,
+      unit_cost: form.price_per_unit as unknown as number,
+      category: form.category,
+    } as unknown as Partial<InventoryItem>);
+    setSaving(false);
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <label className="flex flex-col gap-1">
-          <span className="text-sm text-gray-600">Name</span>
+    <div className="rounded-2xl border p-5 space-y-4">
+      <h2 className="text-xl font-semibold">Edit item</h2>
+
+      <div className="grid grid-cols-2 gap-4">
+        <label className="space-y-1">
+          <span className="text-sm text-neutral-400">Name</span>
           <input
-            className="rounded-lg border px-3 py-2"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. CalMag"
+            className="w-full rounded border bg-black p-2"
+            value={form.name}
+            onChange={(e) => set('name', e.target.value)}
           />
         </label>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-sm text-gray-600">Quantity</span>
+        <label className="space-y-1">
+          <span className="text-sm text-neutral-400">Category</span>
+          <input
+            className="w-full rounded border bg-black p-2"
+            value={form.category ?? ''}
+            onChange={(e) => set('category', e.target.value)}
+          />
+        </label>
+
+        <label className="space-y-1">
+          <span className="text-sm text-neutral-400">Quantity</span>
           <input
             type="number"
-            className="rounded-lg border px-3 py-2"
-            value={quantity}
-            onChange={(e) => setQuantity(Number(e.target.value))}
-            min={0}
-            step="any"
+            className="w-full rounded border bg-black p-2"
+            value={form.quantity}
+            onChange={(e) => set('quantity', Number(e.target.value))}
           />
         </label>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-sm text-gray-600">Unit (UoM)</span>
+        <label className="space-y-1">
+          <span className="text-sm text-neutral-400">Unit</span>
           <input
-            className="rounded-lg border px-3 py-2"
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-            placeholder="e.g. L, ml, g, kg"
+            className="w-full rounded border bg-black p-2"
+            value={form.unit}
+            onChange={(e) => set('unit', e.target.value)}
           />
         </label>
 
-        <label className="flex flex-col gap-1">
-          <span className="text-sm text-gray-600">Price per unit</span>
+        <label className="space-y-1 col-span-2">
+          <span className="text-sm text-neutral-400">Price per Unit</span>
           <input
             type="number"
-            className="rounded-lg border px-3 py-2"
-            value={pricePerUnit}
-            onChange={(e) => setPricePerUnit(Number(e.target.value))}
-            min={0}
-            step="any"
+            step="0.01"
+            className="w-full rounded border bg-black p-2"
+            value={form.price_per_unit}
+            onChange={(e) => set('price_per_unit', Number(e.target.value))}
           />
         </label>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex gap-3">
         <button
-          type="submit"
-          disabled={!changed || saving}
-          className="rounded-lg bg-black text-white px-4 py-2 disabled:opacity-50"
+          className="rounded bg-white text-black px-4 py-2 disabled:opacity-60"
+          onClick={handleSave}
+          disabled={saving}
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
-        {msg && <span className="text-sm">{msg}</span>}
       </div>
-    </form>
+    </div>
   );
 }
