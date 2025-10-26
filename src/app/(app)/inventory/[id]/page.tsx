@@ -1,11 +1,11 @@
-// app/(app)/inventory/[id]/page.tsx
-import { createClient } from '@/utils/supabase';
+'use client';
+
+// src/app/(app)/inventory/[id]/page.tsx
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
-import ItemForm, { type InventoryItem } from './ItemForm';
-import LotsCard, { type Lot } from './LotsCard';
-import UsageHistoryCard, { type Usage } from './UsageHistoryCard';
-import { saveItemAction, addLotAction } from './actions';
+import { useParams } from 'next/navigation';
+import { supabase } from '@/utils/supabase';
+import RequireAuth from '@/components/RequireAuth';
 
 type ItemRow = {
   id: string;
@@ -16,77 +16,98 @@ type ItemRow = {
   category: string | null;
 };
 
-export default async function InventoryItemPage({
-  params: { id },
-}: {
-  params: { id: string };
-}) {
-  const supabase = createClient();
+export default function InventoryItemPage() {
+  const params = useParams<{ id: string }>();
+  const id = params?.id;
 
-  // Fetch item details
-  const { data: item } = (await supabase
-    .from('inventory_items')
-    .select('id,name,unit,unit_cost,qty,category')
-    .eq('id', id)
-    .single()) as { data: ItemRow | null };
+  const [item, setItem] = useState<ItemRow | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  if (!item) return notFound();
+  useEffect(() => {
+    let isMounted = true;
 
-  // Fetch related lots and usage
-  const [{ data: lots }, { data: usages }] = await Promise.all([
-    supabase
-      .from('inventory_item_lots')
-      .select('id,qty,unit_cost,lot_code,created_at,received_at')
-      .eq('item_id', id)
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('inventory_item_usages')
-      .select('id,qty,note,used_at,plant_batch_id,plant_batches(name)')
-      .eq('item_id', id)
-      .order('used_at', { ascending: false }),
-  ]);
+    async function load() {
+      if (!id) return;
 
-  // Prepare UI models
-  const uiItem: InventoryItem = {
-    id,
-    name: item.name ?? '',
-    quantity: item.qty ?? 0,
-    unit: item.unit ?? '',
-    price_per_unit: item.unit_cost ?? 0,
-  };
+      try {
+        const { data: userData } = await supabase.auth.getUser();
+        if (!userData?.user) {
+          setLoading(false);
+          return;
+        }
 
-  const lotsList: Lot[] = (lots as unknown as Lot[]) ?? [];
-  const usageList: Usage[] = (usages as unknown as Usage[]) ?? [];
+        const { data, error } = await supabase
+          .from('inventory_items')
+          .select('id,name,unit,unit_cost,qty,category')
+          .eq('id', id)
+          .single();
 
-  // Server actions
-  const saveItem = async (updates: Partial<InventoryItem>) => {
-    'use server';
-    await saveItemAction(id, updates);
-  };
+        if (error) throw error;
+        if (!isMounted) return;
+        setItem(data);
+      } catch (e) {
+        console.error('Failed to load item:', e);
+        if (!isMounted) return;
+        setItem(null);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
 
-  const addLot = async (input: { lot_code: string; quantity: number; received_at?: string | null }) => {
-    'use server';
-    await addLotAction(id, input);
-  };
+    load();
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-8">
+    <div className="max-w-3xl mx-auto space-y-6">
+      <RequireAuth />
+
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">{uiItem.name || 'Inventory item'}</h1>
+        <h1 className="text-2xl font-semibold">
+          {item?.name || 'Inventory item'}
+        </h1>
         <Link href="/inventory" className="underline">
           Back to inventory
         </Link>
       </div>
 
-      <div className="space-y-6">
-        <div className="rounded-2xl border p-4">
-          <h2 className="mb-3 text-xl font-semibold">Item</h2>
-          <ItemForm item={uiItem} onSave={saveItem} />
+      {loading ? (
+        <div className="text-sm text-gray-500">Loading…</div>
+      ) : !item ? (
+        <div className="rounded-2xl border p-6 text-center text-gray-600">
+          Item not found.
         </div>
+      ) : (
+        <div className="rounded-2xl border p-4 space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="text-gray-500">Quantity</div>
+              <div className="font-medium">{item.qty ?? 0}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">Unit</div>
+              <div className="font-medium">{item.unit ?? '-'}</div>
+            </div>
+            <div>
+              <div className="text-gray-500">Price / Unit</div>
+              <div className="font-medium">
+                {item.unit_cost != null ? `$${item.unit_cost.toFixed(2)}` : '-'}
+              </div>
+            </div>
+            <div>
+              <div className="text-gray-500">Category</div>
+              <div className="font-medium">{item.category ?? '-'}</div>
+            </div>
+          </div>
 
-        <LotsCard lots={lotsList} onAddLot={addLot} />
-        <UsageHistoryCard usage={usageList} />
-      </div>
+          {/* Placeholder for future edit / lots / usage UI */}
+          <div className="rounded-xl bg-gray-50 p-4 text-sm text-gray-600">
+            Editing, lots, and usage history will go here next.
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/utils/supabase';
 
 type Props = { plantBatchId: string; onAdded?: () => void; };
 type EntryType = 'note' | 'stage_change' | 'inventory' | 'cost' | 'labor' | 'env';

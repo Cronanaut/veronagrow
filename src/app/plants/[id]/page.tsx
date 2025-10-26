@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/utils/supabase';
 import RequireAuth from '@/components/RequireAuth';
 import Link from 'next/link';
 

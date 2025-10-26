@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, FormEvent } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/utils/supabase';
 import RequireAuth from '@/components/RequireAuth';
 import Link from 'next/link';
 

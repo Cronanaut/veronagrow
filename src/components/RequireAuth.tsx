@@ -1,41 +1,39 @@
 'use client';
 
-import { useEffect, useState, ReactNode } from 'react';
-import { supabase } from '@/lib/supabase';
+import React from 'react';
+import { useRouter } from 'next/navigation';
+import supabase from '@/utils/supabase';
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 
-type Props = { children: ReactNode; redirectTo?: string };
+type Props = { children?: React.ReactNode };
 
-export default function RequireAuth({ children, redirectTo = '/signin' }: Props) {
-  const [status, setStatus] = useState<'checking' | 'authed' | 'nope'>('checking');
+export default function RequireAuth({ children }: Props) {
+  const router = useRouter();
+  const [checked, setChecked] = React.useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  React.useEffect(() => {
+    let mounted = true;
 
-    (async () => {
-      const { data, error } = await supabase.auth.getUser();
-      if (cancelled) return;
-
-      if (error || !data.user) setStatus('nope');
-      else setStatus('authed');
-    })();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
-      if (session?.user) setStatus('authed');
-      else setStatus('nope');
+    // Initial check
+    supabase.auth.getSession().then(({ data }) => {
+      if (!mounted) return;
+      if (!data.session) router.replace('/signin');
+      setChecked(true);
     });
 
-    return () => {
-      sub.subscription.unsubscribe();
-      cancelled = true;
-    };
-  }, []);
+    // React to auth changes
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      (_event: AuthChangeEvent, session: Session | null) => {
+        if (!session) router.replace('/signin');
+      }
+    );
 
-  if (status === 'checking') {
-    return <main className="max-w-sm mx-auto p-6 text-gray-500">Checking session…</main>;
-  }
-  if (status === 'nope') {
-    if (typeof window !== 'undefined') window.location.replace(redirectTo);
-    return null;
-  }
-  return <>{children}</>;
+    return () => {
+      mounted = false;
+      sub?.subscription?.unsubscribe();
+    };
+  }, [router]);
+
+  if (!checked) return null;
+  return <>{children ?? null}</>;
 }
