@@ -1,6 +1,5 @@
 // Proxy to the canonical server helper.
-// If you add a top-level file later (src/utils/supabase-server.ts),
-// you can keep this re-export so old imports continue to work.
+// Next 15 requires awaiting cookies() before using it.
 
 import { cookies } from 'next/headers';
 import { createServerClient, type CookieOptions } from '@supabase/ssr';
@@ -13,17 +12,15 @@ export default function createServerSupabase() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        // Cast to any to avoid Next’s typing differences across versions.
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        getAll: () => (cookies() as any).getAll(),
-        setAll: (list: CookieRecord[]) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const store: any = cookies();
+        // Next.js 15+ wants these to await cookies() before use
+        getAll: async () => (await cookies()).getAll(),
+        setAll: async (list: CookieRecord[]) => {
+          const store = await cookies();
           for (const { name, value, options } of list) {
             try {
               store.set(name, value, options);
             } catch {
-              // ignore if headers already sent (dev)
+              // ignore if headers already sent in dev fast-refresh
             }
           }
         },

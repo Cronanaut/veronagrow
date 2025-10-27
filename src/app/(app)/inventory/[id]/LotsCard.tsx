@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 export type Lot = {
   id: string;
@@ -32,6 +33,7 @@ type Props = {
 };
 
 export default function LotsCard({ lots, onAddLot, onUpdateLot }: Props) {
+  const router = useRouter();
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [adding, setAdding] = useState(false);
   const [form, setForm] = useState<AddInput>({
@@ -47,9 +49,14 @@ export default function LotsCard({ lots, onAddLot, onUpdateLot }: Props) {
       alert('Enter a quantity > 0');
       return;
     }
-    await onAddLot(form);
-    setForm({ lot_code: today, quantity: 0, received_at: today, unit_cost: null });
-    setAdding(false);
+    try {
+      await onAddLot(form);
+      router.refresh();
+      setForm({ lot_code: today, quantity: 0, received_at: today, unit_cost: null });
+      setAdding(false);
+    } catch (err) {
+      alert((err as Error).message || 'Failed to add lot');
+    }
   }
 
   return (
@@ -150,6 +157,7 @@ function Row({
   lot: Lot;
   onUpdateLot: (lotId: string, patch: { lot_code?: string | null; quantity?: number; received_at?: string | null; unit_cost?: number | null }) => Promise<void>;
 }) {
+  const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({
     lot_code: lot.lot_code ?? '',
@@ -159,13 +167,18 @@ function Row({
   });
 
   async function save() {
-    await onUpdateLot(lot.id, {
-      lot_code: draft.lot_code,
-      quantity: draft.quantity,
-      unit_cost: draft.unit_cost,
-      received_at: draft.received_at || null,
-    });
-    setEditing(false);
+    try {
+      await onUpdateLot(lot.id, {
+        lot_code: draft.lot_code,
+        quantity: draft.quantity,
+        unit_cost: draft.unit_cost,
+        received_at: draft.received_at || null,
+      });
+      router.refresh();
+      setEditing(false);
+    } catch (err) {
+      alert((err as Error).message || 'Failed to update lot');
+    }
   }
 
   return (
@@ -195,23 +208,25 @@ function Row({
           lot.quantity
         )}
       </td>
-      <td className="py-2 pr-2">{editing ? (
-        <input
-          type="number"
-          min={0}
-          step="any"
-          className="rounded-md border px-2 py-1 w-full"
-          value={draft.unit_cost ?? ''}
-          onChange={(e) =>
-            setDraft((s) => ({
-              ...s,
-              unit_cost: e.target.value === '' ? null : Number(e.target.value),
-            }))
-          }
-        />
-      ) : (
-        lot.unit_cost != null ? `$${Number(lot.unit_cost).toFixed(2)}` : '—'
-      )}</td>
+      <td className="py-2 pr-2">
+        {editing ? (
+          <input
+            type="number"
+            min={0}
+            step="any"
+            className="rounded-md border px-2 py-1 w-full"
+            value={draft.unit_cost ?? ''}
+            onChange={(e) =>
+              setDraft((s) => ({
+                ...s,
+                unit_cost: e.target.value === '' ? null : Number(e.target.value),
+              }))
+            }
+          />
+        ) : (
+          lot.unit_cost != null ? `$${Number(lot.unit_cost).toFixed(2)}` : '—'
+        )}
+      </td>
       <td className="py-2 pr-2">
         {editing ? (
           <input

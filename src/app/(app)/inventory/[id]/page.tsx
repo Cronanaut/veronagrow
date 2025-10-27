@@ -1,39 +1,69 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import createServerSupabase from '@/utils/supabase/supabase-server'; // 👈 point to existing helper
+import createServerSupabase from '@/utils/supabase-server';
 import ItemForm, { type InventoryItem } from './ItemForm';
+import LotsCard, { type Lot } from './LotsCard';
+import RecordUsageForm from './RecordUsageForm';
+import { addLotAction, consumeItemAction } from './actions';
 
-export async function saveItemAction(
-  id: string,
-  updates: { name?: string; unit?: string; category?: string }
-) {
-  'use server';
-  const supabase = createServerSupabase();
-  const { error } = await supabase
-    .from('inventory_items')
-    .update({
-      ...(updates.name !== undefined ? { name: updates.name } : {}),
-      ...(updates.unit !== undefined ? { unit: updates.unit } : {}),
-      ...(updates.category !== undefined ? { category: updates.category } : {}),
-    })
-    .eq('id', id);
+// -------- helpers --------
+type LotRow = {
+  id: string;
+  qty?: number | string | null;
+  unit_cost?: number | null;
+  lot_code?: string | null;
+  received_at?: string | null;
+  created_at?: string | null;
+};
 
-  if (error) throw new Error(error.message);
-  revalidatePath(`/inventory/${id}`);
+type PlantBatchRelation = { name?: string | null };
+
+type UsageRow = {
+  id: string;
+  qty?: number | string | null;
+  used_at?: string | null;
+  note?: string | null;
+  plant_batches?: PlantBatchRelation[] | PlantBatchRelation | null;
+};
+
+type PlantRow = { id: string; name: string | null };
+
+function normalizeLotRows(rows: LotRow[] | null | undefined): Lot[] {
+  if (!rows) return [];
+  return rows.map((r) => ({
+    id: r.id,
+    lot_code: r.lot_code ?? null,
+    quantity: Number(r.qty ?? 0),
+    unit_cost: r.unit_cost ?? null,
+    received_at: r.received_at ?? null,
+    created_at: r.created_at ?? null,
+  }));
 }
 
-export default async function InventoryItemPage({
-  params: { id },
-}: {
-  params: { id: string };
-}) {
-  const supabase = createServerSupabase();
+type UsageNorm = {
+  id: string;
+  qty: number;
+  used_at: string | null;
+  note: string | null;
+  plant_name: string | null;
+};
 
-  const { data: itemRow, error: itemErr } = await supabase
+// ---------------------- Page (server) ---------------------------
+export default async function InventoryItemPage({
+  params,
+}: {
+  params: { id: string } | Promise<{ id: string }>;
+}) {
+  const resolvedParams = await Promise.resolve(params);
+  const itemId = resolvedParams.id;
+  const supabaseClient = createServerSupabase();
+
+  // 1) Item
+  const { data: itemRow, error: itemErr } = await supabaseClient
     .from('inventory_items')
     .select('id,name,unit,category,unit_cost')
-    .eq('id', id)
+    .eq('id', itemId)
     .single();
 
   if (itemErr || !itemRow) return notFound();
@@ -46,6 +76,115 @@ export default async function InventoryItemPage({
     unit_cost: itemRow.unit_cost ?? null,
   };
 
+  // 2) Lots, usage, plants
+  const [lotResp, usageResp, plantResp] = await Promise.all([
+    supabaseClient
+      .from('inventory_item_lots')
+      .select('id,qty,unit_cost,lot_code,received_at,created_at')
+      .eq('item_id', itemId)
+      .order('received_at', { ascending: false }),
+    supabaseClient
+      .from('inventory_item_usages')
+      .select('id,qty,note,used_at,plant_batch_id,plant_batches(name)')
+      .eq('item_id', itemId)
+      .order('used_at', { ascending: false }),
+    supabaseClient.from('plant_batches').select('id,name').order('name', { ascending: true }),
+  ]);
+
+  const lotRows = (lotResp.data ?? null) as LotRow[] | null;
+  const usageRows = (usageResp.data ?? null) as UsageRow[] | null;
+  const plantRows = (plantResp.data ?? null) as PlantRow[] | null;
+
+  const lots: Lot[] = normalizeLotRows(lotRows);
+
+  const usageRowsList: UsageRow[] = usageRows ?? [];
+  const usage: UsageNorm[] = usageRowsList.map((u) => ({
+    id: u.id,
+    qty: Number(u.qty ?? 0),
+    used_at: u.used_at ?? null,
+    note: u.note ?? null,
+    plant_name: Array.isArray(u.plant_batches)
+      ? u.plant_batches[0]?.name ?? null
+      : u.plant_batches?.name ?? null,
+  }));
+
+  const plantRowsList: PlantRow[] = plantRows ?? [];
+  const plants = plantRowsList.map((p) => ({ id: p.id, name: p.name }));
+
+  // -------- server actions exposed to client components --------
+  async function saveItemActionLocal(
+    updates: { name?: string; unit?: string; category?: string }
+  ) {
+    'use server';
+    const s = createServerSupabase();
+    const { error } = await s
+      .from('inventory_items')
+      .update({
+        ...(updates.name !== undefined ? { name: updates.name } : {}),
+        ...(updates.unit !== undefined ? { unit: updates.unit } : {}),
+        ...(updates.category !== undefined ? { category: updates.category } : {}),
+      })
+      .eq('id', itemId);
+    if (error) throw new Error(error.message);
+    revalidatePath(`/inventory/${itemId}`);
+    revalidatePath('/inventory');
+  }
+
+  // wrap add-lot (your zod parser expects FormData)
+  async function onAddLot(input: {
+    lot_code?: string;
+    quantity: number;
+    received_at?: string | null;
+    unit_cost?: number | null;
+  }) {
+    'use server';
+    const fd = new FormData();
+    if (input.lot_code) fd.set('lot_code', input.lot_code);
+    fd.set('quantity', String(input.quantity));
+    if (input.received_at) fd.set('received_at', input.received_at);
+    if (input.unit_cost !== undefined && input.unit_cost !== null) {
+      fd.set('unit_cost', String(input.unit_cost));
+    }
+    const res = await addLotAction(itemId, fd);
+    if (!res?.ok) throw new Error(typeof res?.error === 'string' ? res.error : 'Add lot failed');
+  }
+
+  // inline update-lot (so ✏️ Edit works)
+  async function onUpdateLot(
+    lotId: string,
+    patch: { lot_code?: string | null; quantity?: number; received_at?: string | null; unit_cost?: number | null }
+  ) {
+    'use server';
+    const s = createServerSupabase();
+    const updates: Record<string, unknown> = {};
+    if (patch.lot_code !== undefined) updates.lot_code = patch.lot_code;
+    if (patch.quantity !== undefined) updates.qty = patch.quantity;
+    if (patch.unit_cost !== undefined) updates.unit_cost = patch.unit_cost;
+    if (patch.received_at !== undefined) updates.received_at = patch.received_at;
+    const { error } = await s.from('inventory_item_lots').update(updates).eq('id', lotId);
+    if (error) throw new Error(error.message);
+    revalidatePath(`/inventory/${itemId}`);
+    revalidatePath('/inventory');
+  }
+
+  // wrap record-usage (zod expects FormData)
+  async function onRecordUsage(input: {
+    plant_batch_id: string;
+    quantity: number;
+    note?: string;
+    used_at?: string;
+  }) {
+    'use server';
+    const fd = new FormData();
+    fd.set('plant_batch_id', input.plant_batch_id);
+    fd.set('quantity', String(input.quantity));
+    if (input.note) fd.set('note', input.note);
+    if (input.used_at) fd.set('used_at', input.used_at);
+    const res = await consumeItemAction(itemId, fd);
+    if (!res?.ok) throw new Error(typeof res?.error === 'string' ? res.error : 'Record usage failed');
+  }
+
+  // ----------------- render -----------------
   return (
     <div className="max-w-3xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
@@ -55,14 +194,46 @@ export default async function InventoryItemPage({
         </Link>
       </div>
 
+      {/* Item edit */}
       <div className="rounded-2xl border p-4 space-y-4">
-        <ItemForm
-          item={item}
-          onSave={async (u) => {
-            'use server';
-            await saveItemAction(id, u);
-          }}
-        />
+        <ItemForm item={item} onSave={saveItemActionLocal} />
+      </div>
+
+      {/* Lots */}
+      <LotsCard lots={lots} onAddLot={onAddLot} onUpdateLot={onUpdateLot} />
+
+      {/* Record Usage */}
+      <RecordUsageForm plants={plants} onRecord={onRecordUsage} />
+
+      {/* Usage history */}
+      <div className="rounded-2xl border p-4">
+        <h3 className="text-lg font-semibold mb-3">Usage History</h3>
+        {usage.length === 0 ? (
+          <div className="text-sm text-neutral-500">No usage yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-neutral-500">
+                <tr>
+                  <th className="py-2 pr-3">Date</th>
+                  <th className="py-2 pr-3">Plant</th>
+                  <th className="py-2 pr-3">Qty</th>
+                  <th className="py-2 pr-3">Note</th>
+                </tr>
+              </thead>
+              <tbody>
+                {usage.map((u) => (
+                  <tr key={u.id} className="border-t">
+                    <td className="py-2 pr-3">{u.used_at?.slice(0, 10) ?? '—'}</td>
+                    <td className="py-2 pr-3">{u.plant_name ?? '—'}</td>
+                    <td className="py-2 pr-3">{u.qty}</td>
+                    <td className="py-2 pr-3">{u.note ?? ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

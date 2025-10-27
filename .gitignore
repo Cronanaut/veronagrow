@@ -52,3 +52,9 @@ node_modules/
 # Supabase local artifacts
 supabase/.temp
 supabase/.branches
+
+# build & env
+.next/
+node_modules/
+.env*
+*.log

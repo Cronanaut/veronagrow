@@ -3,9 +3,9 @@
 // - default export: client (for client components)
 // - named { supabase }: same client
 // - named { createClient }: returns the same client (legacy callers)
-// If you need server-side usage, import from '@/utils/supabase/server'.
-import client from './client';
+// If you need server-side usage, import from '@/utils/supabase/supabase-server'.
+import client from './supabase-client';
 
 export default client;
-export { default as supabase } from './client';
+export { default as supabase } from './supabase-client';
 export const createClient = () => client;
