@@ -1,11 +1,18 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import createServerSupabase from '@/utils/supabase-server';
 import ItemForm, { type InventoryItem } from './ItemForm';
 import LotsCard, { type Lot } from './LotsCard';
 import RecordUsageForm from './RecordUsageForm';
-import { addLotAction, consumeItemAction } from './actions';
+import UsageHistoryCard from './UsageHistoryCard';
+import {
+  addLotAction,
+  consumeItemAction,
+  deleteLotAction,
+  deleteUsageAction,
+  deleteItemAction,
+} from './actions';
 
 // -------- helpers --------
 type LotRow = {
@@ -41,6 +48,33 @@ function normalizeLotRows(rows: LotRow[] | null | undefined): Lot[] {
   }));
 }
 
+function normalizeQuantity(value: number | string | null | undefined): number {
+  if (value == null) return 0;
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function formatQuantity(value: number | string | null | undefined): string {
+  if (value === Infinity) return '∞';
+  const amount = normalizeQuantity(value);
+  if (amount === Infinity) return '∞';
+  return amount.toLocaleString('en-US', {
+    minimumFractionDigits: amount % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatCurrency(value: number | string | null | undefined): string {
+  const amount = typeof value === 'number' ? value : Number(value ?? 0);
+  const safe = Number.isFinite(amount) ? amount : 0;
+  return safe.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 type UsageNorm = {
   id: string;
   qty: number;
@@ -62,7 +96,7 @@ export default async function InventoryItemPage({
   // 1) Item
   const { data: itemRow, error: itemErr } = await supabaseClient
     .from('inventory_items')
-    .select('id,name,unit,category,unit_cost')
+    .select('id,name,unit,category,unit_cost,qty,is_persistent')
     .eq('id', itemId)
     .single();
 
@@ -74,7 +108,10 @@ export default async function InventoryItemPage({
     unit: itemRow.unit ?? '',
     category: itemRow.category ?? '',
     unit_cost: itemRow.unit_cost ?? null,
+    is_persistent: Boolean(itemRow.is_persistent),
   };
+
+  const quantityOnHand = item.is_persistent ? Infinity : normalizeQuantity(itemRow.qty);
 
   // 2) Lots, usage, plants
   const [lotResp, usageResp, plantResp] = await Promise.all([
@@ -116,6 +153,9 @@ export default async function InventoryItemPage({
     updates: { name?: string; unit?: string; category?: string }
   ) {
     'use server';
+    if (item.is_persistent) {
+      return;
+    }
     const s = createServerSupabase();
     const { error } = await s
       .from('inventory_items')
@@ -138,6 +178,9 @@ export default async function InventoryItemPage({
     unit_cost?: number | null;
   }) {
     'use server';
+    if (item.is_persistent) {
+      throw new Error('This item has unlimited stock; lots are disabled.');
+    }
     const fd = new FormData();
     if (input.lot_code) fd.set('lot_code', input.lot_code);
     fd.set('quantity', String(input.quantity));
@@ -155,6 +198,9 @@ export default async function InventoryItemPage({
     patch: { lot_code?: string | null; quantity?: number; received_at?: string | null; unit_cost?: number | null }
   ) {
     'use server';
+    if (item.is_persistent) {
+      throw new Error('This item has unlimited stock; lots are disabled.');
+    }
     const s = createServerSupabase();
     const updates: Record<string, unknown> = {};
     if (patch.lot_code !== undefined) updates.lot_code = patch.lot_code;
@@ -165,6 +211,15 @@ export default async function InventoryItemPage({
     if (error) throw new Error(error.message);
     revalidatePath(`/inventory/${itemId}`);
     revalidatePath('/inventory');
+  }
+
+  async function onDeleteLot(lotId: string) {
+    'use server';
+    if (item.is_persistent) {
+      throw new Error('This item has unlimited stock; lots are disabled.');
+    }
+    const res = await deleteLotAction(itemId, lotId);
+    if (!res?.ok) throw new Error(typeof res?.error === 'string' ? res.error : 'Delete lot failed');
   }
 
   // wrap record-usage (zod expects FormData)
@@ -184,14 +239,54 @@ export default async function InventoryItemPage({
     if (!res?.ok) throw new Error(typeof res?.error === 'string' ? res.error : 'Record usage failed');
   }
 
+  async function onDeleteUsage(usageId: string) {
+    'use server';
+    const res = await deleteUsageAction(itemId, usageId);
+    if (!res?.ok) throw new Error(typeof res?.error === 'string' ? res.error : 'Delete usage failed');
+  }
+
+  async function onDeleteItem() {
+    'use server';
+    const res = await deleteItemAction(itemId);
+    if (!res?.ok) throw new Error(typeof res?.error === 'string' ? res.error : 'Delete item failed');
+    redirect('/inventory');
+  }
+
   // ----------------- render -----------------
   return (
     <div className="max-w-3xl mx-auto space-y-8">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Item Details</h1>
-        <Link href="/inventory" className="underline">
-          Back to inventory
-        </Link>
+        <div className="flex items-center gap-3">
+          {!item.is_persistent && (
+            <form action={onDeleteItem}>
+              <button
+                type="submit"
+                className="rounded-md border border-red-300 px-3 py-1 text-sm text-red-600 hover:bg-red-50"
+              >
+                Delete item
+              </button>
+            </form>
+          )}
+          <Link href="/inventory" className="underline">
+            Back to inventory
+          </Link>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="rounded-2xl border bg-emerald-50/40 px-4 py-3">
+          <p className="text-xs uppercase tracking-wide text-emerald-700">On Hand</p>
+          <p className="mt-1 text-2xl font-semibold text-emerald-900">
+            {formatQuantity(quantityOnHand)} {item.unit || ''}
+          </p>
+        </div>
+        <div className="rounded-2xl border px-4 py-3">
+          <p className="text-xs uppercase tracking-wide text-neutral-500">Unit Cost</p>
+          <p className="mt-1 text-2xl font-semibold text-neutral-900">
+            {item.unit_cost != null ? formatCurrency(item.unit_cost) : '—'}
+          </p>
+        </div>
       </div>
 
       {/* Item edit */}
@@ -200,41 +295,24 @@ export default async function InventoryItemPage({
       </div>
 
       {/* Lots */}
-      <LotsCard lots={lots} onAddLot={onAddLot} onUpdateLot={onUpdateLot} />
+      {!item.is_persistent ? (
+        <LotsCard
+          lots={lots}
+          onAddLot={onAddLot}
+          onUpdateLot={onUpdateLot}
+          onDeleteLot={onDeleteLot}
+        />
+      ) : (
+        <div className="rounded-2xl border p-4 text-sm text-neutral-600">
+          Lots are disabled for this persistent item.
+        </div>
+      )}
 
       {/* Record Usage */}
       <RecordUsageForm plants={plants} onRecord={onRecordUsage} />
 
       {/* Usage history */}
-      <div className="rounded-2xl border p-4">
-        <h3 className="text-lg font-semibold mb-3">Usage History</h3>
-        {usage.length === 0 ? (
-          <div className="text-sm text-neutral-500">No usage yet.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="text-left text-neutral-500">
-                <tr>
-                  <th className="py-2 pr-3">Date</th>
-                  <th className="py-2 pr-3">Plant</th>
-                  <th className="py-2 pr-3">Qty</th>
-                  <th className="py-2 pr-3">Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage.map((u) => (
-                  <tr key={u.id} className="border-t">
-                    <td className="py-2 pr-3">{u.used_at?.slice(0, 10) ?? '—'}</td>
-                    <td className="py-2 pr-3">{u.plant_name ?? '—'}</td>
-                    <td className="py-2 pr-3">{u.qty}</td>
-                    <td className="py-2 pr-3">{u.note ?? ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <UsageHistoryCard usage={usage} onDelete={onDeleteUsage} />
     </div>
   );
 }

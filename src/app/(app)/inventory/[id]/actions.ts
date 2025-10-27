@@ -30,6 +30,17 @@ const UsageInsertSchema = z.object({
 export async function saveItemAction(itemId: string, formData: FormData) {
   const supabase = createServerSupabase();
 
+  const { data: itemRow, error: itemErr } = await supabase
+    .from('inventory_items')
+    .select('is_persistent')
+    .eq('id', itemId)
+    .maybeSingle();
+  if (itemErr) return { ok: false, error: itemErr.message };
+  if (!itemRow) return { ok: false, error: 'Item not found' };
+  if (itemRow.is_persistent) {
+    return { ok: false, error: 'This item is managed automatically.' };
+  }
+
   const parsed = ItemUpdateSchema.safeParse({
     name: formData.get('name'),
     quantity: formData.get('quantity'),
@@ -76,15 +87,38 @@ export async function addLotAction(itemId: string, formData: FormData) {
   if (uerr) return { ok: false, error: uerr.message };
   if (!user) return { ok: false, error: 'Not signed in' };
 
-  const { error } = await supabase.from('inventory_item_lots').insert({
+  const { data: itemRow, error: itemRowErr } = await supabase
+    .from('inventory_items')
+    .select('is_persistent')
+    .eq('id', itemId)
+    .maybeSingle();
+  if (itemRowErr) return { ok: false, error: itemRowErr.message };
+  if (!itemRow) return { ok: false, error: 'Item not found' };
+  if (itemRow.is_persistent) {
+    return { ok: false, error: 'This item has unlimited stock; lots are disabled.' };
+  }
+
+  const baseInsert: Record<string, unknown> = {
     item_id: itemId,
     lot_code,
     qty: quantity,
-    unit_cost: unit_cost ?? null,        // 👈 persist optional cost
+    unit_cost: unit_cost ?? null, // optional cost
     received_at: received_at ?? null,
     user_id: user.id,
-  });
-  if (error) return { ok: false, error: error.message };
+  };
+
+  let insertErr: { message: string } | null = null;
+  const { error } = await supabase.from('inventory_item_lots').insert(baseInsert);
+  insertErr = error;
+
+  if (insertErr?.message?.toLowerCase().includes('user_id')) {
+    const fallbackInsert = { ...baseInsert };
+    delete fallbackInsert.user_id;
+    const { error: fallbackErr } = await supabase.from('inventory_item_lots').insert(fallbackInsert);
+    insertErr = fallbackErr ?? null;
+  }
+
+  if (insertErr) return { ok: false, error: insertErr.message };
 
   revalidatePath(`/inventory/${itemId}`);
   revalidatePath('/inventory');
@@ -122,15 +156,24 @@ export async function consumeItemAction(itemId: string, formData: FormData) {
   if (itemMetaErr) return { ok: false, error: itemMetaErr.message };
   if (!itemMeta) return { ok: false, error: 'Inventory item not found' };
 
-  const { error } = await supabase.from('inventory_item_usages').insert({
-    item_id: itemId,
-    plant_batch_id,
-    qty: quantity,
-    note,
-    used_at: usedAtIso,
-    user_id: user.id,
-  });
-  if (error) return { ok: false, error: error.message };
+  const {
+    data: usageRecord,
+    error: usageErr,
+  } = await supabase
+    .from('inventory_item_usages')
+    .insert({
+      item_id: itemId,
+      plant_batch_id,
+      qty: quantity,
+      note,
+      used_at: usedAtIso,
+      user_id: user.id,
+    })
+    .select('id')
+    .single();
+  if (usageErr) return { ok: false, error: usageErr.message };
+
+  const usageId = usageRecord?.id ?? null;
 
   if (plant_batch_id) {
     const unitLabel = itemMeta.unit ? itemMeta.unit.trim() : '';
@@ -139,41 +182,147 @@ export async function consumeItemAction(itemId: string, formData: FormData) {
     const details = note?.trim() ? `${baseLine}\n\n${note.trim()}` : baseLine;
     const entryDate = usedAtIso.slice(0, 10);
 
-    const diaryPayload: Record<string, unknown> = {
+    const basePayload: Record<string, unknown> = {
       plant_batch_id,
       user_id: user.id,
       entry_date: entryDate,
       note: details,
     };
-
-    let diaryErr: { message: string; code?: string } | null = null;
-    const { error: primaryDiaryErr } = await supabase.from('diary_entries').insert(diaryPayload);
-    diaryErr = primaryDiaryErr;
-
-    const needsFallback =
-      !!diaryErr &&
-      (
-        diaryErr.code === '42703' ||
-        diaryErr.message?.toLowerCase().includes('plant_batch_id') ||
-        diaryErr.message?.toLowerCase().includes('content')
-      );
-
-    if (needsFallback) {
-      // Column mismatch in legacy schema: retry with batch_id instead of plant_batch_id.
-      const fallbackPayload: Record<string, unknown> = {
-        batch_id: plant_batch_id,
-        user_id: user.id,
-        entry_date: entryDate,
-        note: details,
-      };
-      const { error: fallbackErr } = await supabase.from('diary_entries').insert(fallbackPayload);
-      diaryErr = fallbackErr ?? null;
+    const fallbackPayload: Record<string, unknown> = {
+      batch_id: plant_batch_id,
+      user_id: user.id,
+      entry_date: entryDate,
+      note: details,
+    };
+    if (usageId) {
+      basePayload.inventory_usage_id = usageId;
+      fallbackPayload.inventory_usage_id = usageId;
     }
 
-    if (diaryErr) return { ok: false, error: `Usage saved but diary entry failed: ${diaryErr.message}` };
+    const payloadVariants: Record<string, unknown>[] = [basePayload, fallbackPayload];
+    let diaryErr: { message: string; code?: string } | null = null;
+    let insertedDiary = false;
+
+    for (const payload of payloadVariants) {
+      const { error: attemptErr } = await supabase.from('diary_entries').insert(payload);
+      if (!attemptErr) {
+        insertedDiary = true;
+        diaryErr = null;
+        break;
+      }
+
+      diaryErr = attemptErr;
+      const msg = attemptErr.message?.toLowerCase() ?? '';
+
+      if (msg.includes('inventory_usage_id')) {
+        delete payload.inventory_usage_id;
+        payloadVariants.forEach((p) => delete p.inventory_usage_id);
+        const { error: retryErr } = await supabase.from('diary_entries').insert(payload);
+        if (!retryErr) {
+          insertedDiary = true;
+          diaryErr = null;
+          break;
+        }
+        diaryErr = retryErr;
+      }
+
+      if (!msg.includes('plant_batch_id') && !msg.includes('batch_id') && !msg.includes('inventory_usage_id')) {
+        break;
+      }
+    }
+
+    if (!insertedDiary && diaryErr) {
+      return { ok: false, error: `Usage saved but diary entry failed: ${diaryErr.message}` };
+    }
   }
 
   revalidatePath(`/inventory/${itemId}`);
+  revalidatePath('/inventory');
+  return { ok: true };
+}
+
+/** Delete a specific lot */
+export async function deleteLotAction(itemId: string, lotId: string) {
+  const supabase = createServerSupabase();
+
+  const {
+    data: { user },
+    error: uerr,
+  } = await supabase.auth.getUser();
+  if (uerr) return { ok: false, error: uerr.message };
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const { data: itemRow, error: itemErr } = await supabase
+    .from('inventory_items')
+    .select('is_persistent')
+    .eq('id', itemId)
+    .maybeSingle();
+  if (itemErr) return { ok: false, error: itemErr.message };
+  if (!itemRow) return { ok: false, error: 'Item not found' };
+  if (itemRow.is_persistent) {
+    return { ok: false, error: 'This item has unlimited stock; lots are disabled.' };
+  }
+
+  const { error } = await supabase
+    .from('inventory_item_lots')
+    .delete()
+    .eq('id', lotId)
+    .eq('item_id', itemId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/inventory/${itemId}`);
+  revalidatePath('/inventory');
+  return { ok: true };
+}
+
+/** Delete a usage record */
+export async function deleteUsageAction(itemId: string, usageId: string) {
+  const supabase = createServerSupabase();
+
+  const {
+    data: { user },
+    error: uerr,
+  } = await supabase.auth.getUser();
+  if (uerr) return { ok: false, error: uerr.message };
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const { error } = await supabase
+    .from('inventory_item_usages')
+    .delete()
+    .eq('id', usageId)
+    .eq('item_id', itemId);
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/inventory/${itemId}`);
+  revalidatePath('/inventory');
+  return { ok: true };
+}
+
+/** Delete an inventory item (non-persistent only) */
+export async function deleteItemAction(itemId: string) {
+  const supabase = createServerSupabase();
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+  if (userErr) return { ok: false, error: userErr.message };
+  if (!user) return { ok: false, error: 'Not signed in' };
+
+  const { data: itemRow, error: itemErr } = await supabase
+    .from('inventory_items')
+    .select('is_persistent')
+    .eq('id', itemId)
+    .maybeSingle();
+  if (itemErr) return { ok: false, error: itemErr.message };
+  if (!itemRow) return { ok: false, error: 'Item not found' };
+  if (itemRow.is_persistent) {
+    return { ok: false, error: 'This item is managed automatically and cannot be deleted.' };
+  }
+
+  const { error: deleteErr } = await supabase.from('inventory_items').delete().eq('id', itemId);
+  if (deleteErr) return { ok: false, error: deleteErr.message };
+
   revalidatePath('/inventory');
   return { ok: true };
 }

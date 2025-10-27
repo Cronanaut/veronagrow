@@ -10,7 +10,11 @@ type Batch = {
   name: string;
   stage: string | null;
   start_date: string; // ISO date (YYYY-MM-DD)
-  strain: string | null;
+  lineage: string | null;
+  breeder: string | null;
+  harvested_at: string | null;
+  yield_bud: number | null;
+  yield_trim: number | null;
 };
 
 export default function PlantsPage() {
@@ -35,13 +39,46 @@ function PlantsInner() {
         return;
       }
 
-      const { data, error } = await supabase
+      const baseQuery = supabase
         .from('plant_batches')
-        .select('id, name, stage, start_date, strain')
+        .select('id, name, stage, start_date, strain, breeder, harvested_at, yield_bud, yield_trim')
         .order('created_at', { ascending: false });
 
-      if (error) setErr(error.message);
-      else setRows((data ?? []) as Batch[]);
+      const { data, error } = await baseQuery;
+
+      let result: any[] | null = (data ?? null) as any[] | null;
+      if (error) {
+        const msg = error.message?.toLowerCase() ?? '';
+        if (msg.includes('breeder')) {
+          const fallback = await supabase
+            .from('plant_batches')
+            .select('id, name, stage, start_date, strain, harvested_at, yield_bud, yield_trim')
+            .order('created_at', { ascending: false });
+          if (fallback.error) {
+            setErr(fallback.error.message);
+            setLoading(false);
+            return;
+          }
+          result = (fallback.data ?? null) as any[] | null;
+        } else {
+          setErr(error.message);
+          setLoading(false);
+          return;
+        }
+      }
+
+      const mapped = (result ?? []).map((row: any) => ({
+        id: row.id as string,
+        name: row.name as string,
+        stage: (row.stage as string | null) ?? null,
+        start_date: row.start_date as string,
+        lineage: (row.strain as string | null) ?? null,
+        breeder: (row.breeder as string | null) ?? null,
+        harvested_at: (row.harvested_at as string | null) ?? null,
+        yield_bud: row.yield_bud != null ? Number(row.yield_bud) : null,
+        yield_trim: row.yield_trim != null ? Number(row.yield_trim) : null,
+      })) as Batch[];
+      setRows(mapped);
       setLoading(false);
     })();
   }, []);
@@ -62,22 +99,57 @@ function PlantsInner() {
         </div>
       )}
 
-      <ul className="space-y-2">
-        {rows.map((r) => (
-          <li key={r.id} className="rounded border p-3">
-            <div className="flex items-center justify-between">
-              <a href={`/plants/${r.id}`} className="font-medium underline">
-                {r.name}
-              </a>
-              <span className="text-sm text-gray-600">{formatStage(r.stage)}</span>
-            </div>
-            <div className="mt-1 text-sm text-gray-600">
-              Started: {formatDate(r.start_date)}
-              {r.strain ? ` • Strain: ${r.strain}` : ''}
-            </div>
-          </li>
-        ))}
-      </ul>
+      <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Active Plants</h2>
+        {rows.filter((r) => !r.harvested_at).length === 0 ? (
+          <p className="text-sm text-gray-600">No active plants.</p>
+        ) : (
+          <ul className="space-y-2">
+            {rows
+              .filter((r) => !r.harvested_at)
+              .map((r) => (
+                <li key={r.id} className="rounded border p-3">
+                  <div className="flex items-center justify-between">
+                    <a href={`/plants/${r.id}`} className="font-medium underline">
+                      {r.name}
+                    </a>
+                    <span className="text-sm text-gray-600">{formatStage(r.stage)}</span>
+                  </div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    Plant Date: {formatDate(r.start_date)}
+                    {r.lineage ? ` • Lineage: ${r.lineage}` : ''}
+                    {r.breeder ? ` • Breeder: ${r.breeder}` : ''}
+                  </div>
+                </li>
+              ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="space-y-2">
+        <h2 className="text-lg font-semibold">Harvested Plants</h2>
+        {rows.filter((r) => r.harvested_at).length === 0 ? (
+          <p className="text-sm text-gray-600">No harvested plants yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {rows
+              .filter((r) => r.harvested_at)
+              .map((r) => (
+                <li key={r.id} className="rounded border p-3">
+                  <div className="flex items-center justify-between">
+                    <a href={`/plants/${r.id}`} className="font-medium underline">
+                      {r.name}
+                    </a>
+                    <span className="text-sm text-gray-600">Harvested: {formatDate(r.harvested_at)}</span>
+                  </div>
+                  <div className="mt-1 text-sm text-gray-600">
+                    Bud yield: {formatYield(r.yield_bud)} • Trim yield: {formatYield(r.yield_trim)}
+                  </div>
+                </li>
+              ))}
+          </ul>
+        )}
+      </section>
     </main>
   );
 }
@@ -89,4 +161,9 @@ function formatDate(iso: string | null | undefined) {
 
 function formatStage(stage: string | null) {
   return stage ?? '—';
+}
+
+function formatYield(value: number | null | undefined) {
+  if (value == null) return '—';
+  return Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
 }

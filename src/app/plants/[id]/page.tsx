@@ -11,7 +11,12 @@ type Plant = {
   name: string;
   stage: string | null;
   start_date: string; // YYYY-MM-DD
-  strain: string | null;
+  lineage: string | null;
+  breeder: string | null;
+  harvested_at: string | null;
+  yield_bud: number | null;
+  yield_trim: number | null;
+  ctp_total: number | null;
 };
 
 type DiaryEntry = {
@@ -19,6 +24,7 @@ type DiaryEntry = {
   note: string | null;
   created_at: string; // ISO timestamp
   entry_date: string | null; // optional YYYY-MM-DD
+  inventory_usage_id?: string | null;
 };
 
 export default function PlantDetailsPage() {
@@ -49,9 +55,16 @@ function PlantDetailsInner() {
   const [name, setName] = useState('');
   const [start, setStart] = useState<string>('');
   const [stage, setStage] = useState<string>('seedling');
-  const [strain, setStrain] = useState<string>('');
+  const [lineage, setLineage] = useState<string>('');
+  const [breeder, setBreeder] = useState<string>('');
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [harvestedAt, setHarvestedAt] = useState<string>('');
+  const [yieldBud, setYieldBud] = useState<string>('');
+  const [yieldTrim, setYieldTrim] = useState<string>('');
+  const [harvestErr, setHarvestErr] = useState<string | null>(null);
+  const [harvestMsg, setHarvestMsg] = useState<string | null>(null);
+  const [harvesting, setHarvesting] = useState(false);
 
   // Diary state
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
@@ -75,16 +88,39 @@ function PlantDetailsInner() {
         return;
       }
 
-      const { data, error } = await supabase
+      const baseQuery = supabase
         .from('plant_batches')
-        .select('id, name, stage, start_date, strain')
+        .select('id, name, stage, start_date, strain, breeder, harvested_at, yield_bud, yield_trim, ctp_total')
         .eq('id', plantId)
         .maybeSingle();
 
+      let data: Record<string, unknown> | null = null;
+      const { data: baseData, error } = await baseQuery;
+
       if (error) {
-        setErr(error.message);
-        setLoading(false);
-        return;
+        const msg = error.message?.toLowerCase() ?? '';
+        if (msg.includes('breeder')) {
+          const fallback = await supabase
+            .from('plant_batches')
+            .select('id, name, stage, start_date, strain, harvested_at, yield_bud, yield_trim, ctp_total')
+            .eq('id', plantId)
+            .maybeSingle();
+          if (fallback.error) {
+            setErr(fallback.error.message);
+            setLoading(false);
+            return;
+          }
+          data = (fallback.data as Record<string, unknown> | null) ?? null;
+          if (data) {
+            (data as any).breeder = null;
+          }
+        } else {
+          setErr(error.message);
+          setLoading(false);
+          return;
+        }
+      } else {
+        data = baseData as Record<string, unknown> | null;
       }
 
       if (!data) {
@@ -92,13 +128,33 @@ function PlantDetailsInner() {
         setLoading(false);
         return;
       }
-
-      const p = data as Plant;
-      setPlant(p);
+      const raw = data as Record<string, unknown>;
+      const p: Plant = {
+        id: raw.id as string,
+        name: (raw.name as string) ?? '',
+        stage: (raw.stage as string | null) ?? null,
+        start_date: (raw.start_date as string) ?? '',
+        lineage: (raw.strain as string | null) ?? null,
+        breeder: (raw.breeder as string | null) ?? null,
+        harvested_at: (raw.harvested_at as string | null) ?? null,
+        yield_bud: raw.yield_bud != null ? Number(raw.yield_bud) : null,
+        yield_trim: raw.yield_trim != null ? Number(raw.yield_trim) : null,
+        ctp_total: (raw.ctp_total as number | null) ?? null,
+      };
+      setPlant({
+        ...p,
+        ctp_total: normalizeCurrency(p.ctp_total),
+      });
       setName(p.name ?? '');
       setStart(p.start_date ?? '');
       setStage(p.stage ?? 'seedling');
-      setStrain(p.strain ?? '');
+      setLineage(p.lineage ?? '');
+      setBreeder(p.breeder ?? '');
+      setHarvestedAt(p.harvested_at ? p.harvested_at.slice(0, 10) : new Date().toISOString().slice(0, 10));
+      setYieldBud(p.yield_bud != null ? String(p.yield_bud) : '');
+      setYieldTrim(p.yield_trim != null ? String(p.yield_trim) : '');
+      setHarvestErr(null);
+      setHarvestMsg(null);
       setLoading(false);
 
       await loadDiary(p.id);
@@ -110,13 +166,32 @@ function PlantDetailsInner() {
   async function loadDiary(pid: string) {
     setDLoading(true);
     setDErr(null);
-    const { data, error } = await supabase
+    const baseQuery = supabase
       .from('diary_entries')
-      .select('id, note, created_at, entry_date')
+      .select('id, note, created_at, entry_date, inventory_usage_id')
       .eq('batch_id', pid)
       .order('created_at', { ascending: false });
 
+    const { data, error } = await baseQuery;
+
     if (error) {
+      const msg = error.message?.toLowerCase() ?? '';
+      if (msg.includes('inventory_usage_id')) {
+        const { data: fallbackData, error: fallbackErr } = await supabase
+          .from('diary_entries')
+          .select('id, note, created_at, entry_date')
+          .eq('batch_id', pid)
+          .order('created_at', { ascending: false });
+        if (fallbackErr) {
+          setDErr(fallbackErr.message);
+          setDLoading(false);
+          return;
+        }
+        setEntries((fallbackData ?? []) as DiaryEntry[]);
+        setDLoading(false);
+        return;
+      }
+
       setDErr(error.message);
       setDLoading(false);
       return;
@@ -132,7 +207,7 @@ function PlantDetailsInner() {
     setSavedMsg(null);
 
     if (!name.trim()) return setErr('Please enter a name.');
-    if (!start) return setErr('Please choose a start date.');
+    if (!start) return setErr('Please choose a plant date.');
 
     setSaving(true);
     try {
@@ -142,22 +217,52 @@ function PlantDetailsInner() {
           name: name.trim(),
           start_date: start,
           stage,
-          strain: strain.trim() || null,
+          strain: lineage.trim() || null,
+          breeder: breeder.trim() || null,
         })
         .eq('id', plant.id)
         .select('id')
         .maybeSingle();
 
-      if (error) return setErr(error.message);
+      if (error) {
+        const msg = error.message?.toLowerCase() ?? '';
+        if (msg.includes('breeder')) {
+          const fallback = await supabase
+            .from('plant_batches')
+            .update({
+              name: name.trim(),
+              start_date: start,
+              stage,
+              strain: lineage.trim() || null,
+            })
+            .eq('id', plant.id)
+            .select('id')
+            .maybeSingle();
+          if (fallback.error) {
+            setErr(fallback.error.message);
+            setSaving(false);
+            return;
+          }
+        } else {
+          setErr(error.message);
+          setSaving(false);
+          return;
+        }
+      }
 
       setSavedMsg('Saved.');
-      setPlant({
-        id: plant.id,
-        name: name.trim(),
-        start_date: start,
-        stage,
-        strain: strain.trim() || null,
-      });
+      setPlant((prev) =>
+        prev
+          ? {
+              ...prev,
+              name: name.trim(),
+              start_date: start,
+              stage,
+              lineage: lineage.trim() || null,
+              breeder: breeder.trim() || null,
+            }
+          : prev
+      );
       setTimeout(() => setSavedMsg(null), 1200);
     } finally {
       setSaving(false);
@@ -180,6 +285,89 @@ function PlantDetailsInner() {
       router.push('/plants');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function harvestPlant(e: FormEvent) {
+    e.preventDefault();
+    if (!plant) return;
+    setHarvestErr(null);
+    setHarvestMsg(null);
+    setHarvesting(true);
+    try {
+      const payload: Record<string, unknown> = {
+        harvested_at: harvestedAt ? new Date(harvestedAt).toISOString() : new Date().toISOString(),
+        yield_bud: yieldBud ? Number(yieldBud) : null,
+        yield_trim: yieldTrim ? Number(yieldTrim) : null,
+      };
+
+      const { error } = await supabase
+        .from('plant_batches')
+        .update(payload)
+        .eq('id', plant.id)
+        .select('harvested_at,yield_bud,yield_trim')
+        .maybeSingle();
+
+      if (error) {
+        setHarvestErr(error.message);
+        return;
+      }
+
+      setPlant((prev) =>
+        prev
+          ? {
+              ...prev,
+              harvested_at: payload.harvested_at as string,
+              yield_bud: payload.yield_bud as number | null,
+              yield_trim: payload.yield_trim as number | null,
+            }
+          : prev
+      );
+      setHarvestedAt((payload.harvested_at as string).slice(0, 10));
+      setHarvestMsg('Harvest saved.');
+      setTimeout(() => setHarvestMsg(null), 1500);
+    } finally {
+      setHarvesting(false);
+    }
+  }
+
+  async function revertHarvest() {
+    if (!plant) return;
+    const ok = window.confirm('Revert harvest for this plant?');
+    if (!ok) return;
+    setHarvestErr(null);
+    setHarvestMsg(null);
+    setHarvesting(true);
+    try {
+      const { error } = await supabase
+        .from('plant_batches')
+        .update({ harvested_at: null, yield_bud: null, yield_trim: null })
+        .eq('id', plant.id)
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        setHarvestErr(error.message);
+        return;
+      }
+
+      setPlant((prev) =>
+        prev
+          ? {
+              ...prev,
+              harvested_at: null,
+              yield_bud: null,
+              yield_trim: null,
+            }
+          : prev
+      );
+      setHarvestedAt(new Date().toISOString().slice(0, 10));
+      setYieldBud('');
+      setYieldTrim('');
+      setHarvestMsg('Harvest reverted.');
+      setTimeout(() => setHarvestMsg(null), 1500);
+    } finally {
+      setHarvesting(false);
     }
   }
 
@@ -236,7 +424,20 @@ function PlantDetailsInner() {
       setDErr(error.message);
       return;
     }
-    setEntries((prev) => prev.filter((x) => x.id !== id));
+    await loadDiary(plant.id);
+
+    const { data: updatedPlant, error: plantErr } = await supabase
+      .from('plant_batches')
+      .select('ctp_total')
+      .eq('id', plant.id)
+      .maybeSingle();
+    if (!plantErr && updatedPlant) {
+      setPlant((prev) =>
+        prev
+          ? { ...prev, ctp_total: normalizeCurrency(updatedPlant.ctp_total) }
+          : prev
+      );
+    }
   }
 
   if (loading) {
@@ -260,6 +461,15 @@ function PlantDetailsInner() {
         <div>
           <h1 className="text-2xl font-bold">{plant?.name ?? 'Plant'}</h1>
           <p className="text-sm text-gray-600">ID: {plant?.id}</p>
+          {plant && (
+            <p className="mt-1 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+              Cost to Produce
+              <span className="font-semibold">{formatCurrency(plant.ctp_total ?? 0)}</span>
+            </p>
+          )}
+          {plant?.harvested_at && (
+            <p className="text-xs text-gray-500 mt-1">Harvested on {plant.harvested_at.slice(0, 10)}</p>
+          )}
         </div>
         <Link href="/plants/">Go back to plants</Link>
       </header>
@@ -301,7 +511,7 @@ function PlantDetailsInner() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm">Start date</label>
+              <label className="mb-1 block text-sm">Plant Date</label>
               <input
                 className="w-full rounded border p-2"
                 type="date"
@@ -312,7 +522,7 @@ function PlantDetailsInner() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm">Stage</label>
+              <label className="mb-1 block text-sm">Growth Stage</label>
               <select
                 className="w-full rounded border p-2"
                 value={stage}
@@ -327,12 +537,22 @@ function PlantDetailsInner() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm">Strain (optional)</label>
+              <label className="mb-1 block text-sm">Lineage (optional)</label>
               <input
                 className="w-full rounded border p-2"
-                value={strain}
-                onChange={(e) => setStrain(e.target.value)}
-                placeholder="e.g., Blue Dream"
+                value={lineage}
+                onChange={(e) => setLineage(e.target.value)}
+                placeholder="e.g., (OG Kush × GSC)"
+              />
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm">Breeder (optional)</label>
+              <input
+                className="w-full rounded border p-2"
+                value={breeder}
+                onChange={(e) => setBreeder(e.target.value)}
+                placeholder="e.g., Humboldt Seed Co."
               />
             </div>
 
@@ -353,6 +573,74 @@ function PlantDetailsInner() {
               </button>
             </div>
           </form>
+
+          <hr className="my-4" />
+
+          {plant?.harvested_at ? (
+            <div className="space-y-3">
+              <div className="rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                Harvested on {plant.harvested_at.slice(0, 10)}
+                {plant.yield_bud != null ? ` • Bud yield: ${plant.yield_bud}` : ''}
+                {plant.yield_trim != null ? ` • Trim yield: ${plant.yield_trim}` : ''}
+              </div>
+              {harvestMsg && <p className="text-sm text-emerald-600">{harvestMsg}</p>}
+              {harvestErr && <p className="text-sm text-red-600">{harvestErr}</p>}
+              <button
+                type="button"
+                onClick={revertHarvest}
+                className="rounded border px-3 py-2 text-sm text-blue-700 border-blue-600"
+                disabled={harvesting}
+              >
+                {harvesting ? 'Reverting…' : 'Revert harvest'}
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={harvestPlant} className="space-y-3">
+              <h3 className="text-sm font-semibold">Harvest</h3>
+              <div>
+                <label className="mb-1 block text-sm">Harvest date</label>
+                <input
+                  className="w-full rounded border p-2"
+                  type="date"
+                  value={harvestedAt}
+                  onChange={(e) => setHarvestedAt(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm">Bud yield (optional)</label>
+                <input
+                  className="w-full rounded border p-2"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={yieldBud}
+                  onChange={(e) => setYieldBud(e.target.value)}
+                  placeholder="e.g., 420"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm">Trim yield (optional)</label>
+                <input
+                  className="w-full rounded border p-2"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={yieldTrim}
+                  onChange={(e) => setYieldTrim(e.target.value)}
+                  placeholder="e.g., 60"
+                />
+              </div>
+              {harvestErr && <p className="text-sm text-red-600">{harvestErr}</p>}
+              {harvestMsg && <p className="text-sm text-emerald-600">{harvestMsg}</p>}
+              <button
+                type="submit"
+                className="rounded border border-emerald-600 px-3 py-2 text-sm text-emerald-700"
+                disabled={harvesting}
+              >
+                {harvesting ? 'Saving…' : 'Harvest plant'}
+              </button>
+            </form>
+          )}
         </section>
       )}
 
@@ -444,4 +732,20 @@ function displayEntryDate(entryDate: string | null, createdAt: string) {
   } catch {
     return `Date: ${entryDate ?? createdAt}`;
   }
+}
+
+function normalizeCurrency(value: number | string | null | undefined): number {
+  if (value == null) return 0;
+  const num = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function formatCurrency(value: number | string | null | undefined): string {
+  const amount = normalizeCurrency(value);
+  return amount.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 }

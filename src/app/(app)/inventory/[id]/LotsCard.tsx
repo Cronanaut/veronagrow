@@ -30,9 +30,10 @@ type Props = {
   lots: Lot[];
   onAddLot: (input: AddInput) => Promise<void>;
   onUpdateLot: (lotId: string, patch: Patch) => Promise<void>;
+  onDeleteLot: (lotId: string) => Promise<void>;
 };
 
-export default function LotsCard({ lots, onAddLot, onUpdateLot }: Props) {
+export default function LotsCard({ lots, onAddLot, onUpdateLot, onDeleteLot }: Props) {
   const router = useRouter();
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [adding, setAdding] = useState(false);
@@ -141,7 +142,7 @@ export default function LotsCard({ lots, onAddLot, onUpdateLot }: Props) {
           </thead>
           <tbody>
             {lots.map((lot) => (
-              <Row key={lot.id} lot={lot} onUpdateLot={onUpdateLot} />
+              <Row key={lot.id} lot={lot} onUpdateLot={onUpdateLot} onDeleteLot={onDeleteLot} />
             ))}
           </tbody>
         </table>
@@ -153,12 +154,15 @@ export default function LotsCard({ lots, onAddLot, onUpdateLot }: Props) {
 function Row({
   lot,
   onUpdateLot,
+  onDeleteLot,
 }: {
   lot: Lot;
   onUpdateLot: (lotId: string, patch: { lot_code?: string | null; quantity?: number; received_at?: string | null; unit_cost?: number | null }) => Promise<void>;
+  onDeleteLot: (lotId: string) => Promise<void>;
 }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [draft, setDraft] = useState({
     lot_code: lot.lot_code ?? '',
     quantity: lot.quantity,
@@ -178,6 +182,22 @@ function Row({
       setEditing(false);
     } catch (err) {
       alert((err as Error).message || 'Failed to update lot');
+    }
+  }
+
+  async function remove() {
+    if (deleting) return;
+    const confirmDelete = window.confirm('Delete this lot? This cannot be undone.');
+    if (!confirmDelete) return;
+
+    setDeleting(true);
+    try {
+      await onDeleteLot(lot.id);
+      router.refresh();
+    } catch (err) {
+      alert((err as Error).message || 'Failed to delete lot');
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -240,28 +260,37 @@ function Row({
         )}
       </td>
       <td className="py-2 pr-2 text-right">
-        <button
-          className="rounded-md border px-2 py-1 text-xs"
-          onClick={() => (editing ? save() : setEditing(true))}
-        >
-          {editing ? 'Save' : '✏️ Edit'}
-        </button>
-        {editing && (
+        <div className="flex items-center justify-end gap-2">
           <button
-            className="ml-2 rounded-md border px-2 py-1 text-xs"
-            onClick={() => {
-              setEditing(false);
-              setDraft({
-                lot_code: lot.lot_code ?? '',
-                quantity: lot.quantity,
-                unit_cost: lot.unit_cost ?? null,
-                received_at: lot.received_at ?? '',
-              });
-            }}
+            className="rounded-md border px-2 py-1 text-xs"
+            onClick={() => (editing ? save() : setEditing(true))}
           >
-            Cancel
+            {editing ? 'Save' : '✏️ Edit'}
           </button>
-        )}
+          {editing && (
+            <button
+              className="rounded-md border px-2 py-1 text-xs"
+              onClick={() => {
+                setEditing(false);
+                setDraft({
+                  lot_code: lot.lot_code ?? '',
+                  quantity: lot.quantity,
+                  unit_cost: lot.unit_cost ?? null,
+                  received_at: lot.received_at ?? '',
+                });
+              }}
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            className="rounded-md border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+            onClick={remove}
+            disabled={deleting}
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </button>
+        </div>
       </td>
     </tr>
   );

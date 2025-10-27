@@ -9,6 +9,7 @@ export type InventoryItem = {
   category: string;
   // Read-only display; calculated from lots
   unit_cost: number | null;
+  is_persistent: boolean;
 };
 
 type Props = {
@@ -22,8 +23,11 @@ export default function ItemForm({ item, onSave }: Props) {
   const [category, setCategory] = useState(item.category ?? '');
   const [saving, setSaving] = useState(false);
 
+  const readOnly = item.is_persistent;
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    if (readOnly) return;
     setSaving(true);
     try {
       await onSave({
@@ -46,6 +50,7 @@ export default function ItemForm({ item, onSave }: Props) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="e.g. Part A Nutrient"
+            disabled={readOnly}
           />
         </label>
 
@@ -56,6 +61,7 @@ export default function ItemForm({ item, onSave }: Props) {
             value={unit}
             onChange={(e) => setUnit(e.target.value)}
             placeholder="e.g. mL, g, oz"
+            disabled={readOnly}
           />
         </label>
 
@@ -66,27 +72,28 @@ export default function ItemForm({ item, onSave }: Props) {
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             placeholder="e.g. Nutrient"
+            disabled={readOnly}
           />
         </label>
 
-        {/* Read-only price per unit (driven by lots) */}
-        <div className="flex flex-col gap-1">
-          <span className="text-sm text-neutral-500">Price / Unit</span>
-          <div className="rounded-md border px-3 py-2 bg-neutral-50">
-            {item.unit_cost != null ? `$${Number(item.unit_cost).toFixed(2)}` : '—'}
+        {readOnly && (
+          <div className="md:col-span-2 rounded-md border border-dashed bg-neutral-50 px-3 py-2 text-sm text-neutral-600">
+            This item is managed automatically and cannot be edited.
           </div>
-        </div>
+        )}
       </div>
 
-      <div className="flex items-center gap-3 pt-2">
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save changes'}
-        </button>
-      </div>
+      {!readOnly && (
+        <div className="flex items-center gap-3 pt-2">
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-md border px-4 py-2 text-sm disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      )}
     </form>
   );
 }

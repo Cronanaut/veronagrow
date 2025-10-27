@@ -17,7 +17,8 @@ function NewPlantInner() {
   const [name, setName] = useState('');
   const [start, setStart] = useState<string>('');
   const [stage, setStage] = useState('seedling'); // seedling | veg | flower | dry | cure
-  const [strain, setStrain] = useState('');
+  const [lineage, setLineage] = useState('');
+  const [breeder, setBreeder] = useState('');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -30,7 +31,7 @@ function NewPlantInner() {
       return;
     }
     if (!start) {
-      setErr('Please choose a start date.');
+      setErr('Please choose a plant date.');
       return;
     }
 
@@ -48,14 +49,29 @@ function NewPlantInner() {
         name: name.trim(),
         start_date: start, // YYYY-MM-DD
         stage,
-        strain: strain.trim() || null,
+        strain: lineage.trim() || null,
+        breeder: breeder.trim() || null,
       };
 
       const { error } = await supabase.from('plant_batches').insert(payload);
       if (error) {
-        setErr(error.message);
-        setSaving(false);
-        return;
+        const msg = error.message?.toLowerCase() ?? '';
+        if (msg.includes('breeder')) {
+          const fallbackPayload = { ...payload } as any;
+          delete fallbackPayload.breeder;
+          const { error: fallbackErr } = await supabase
+            .from('plant_batches')
+            .insert(fallbackPayload);
+          if (fallbackErr) {
+            setErr(fallbackErr.message);
+            setSaving(false);
+            return;
+          }
+        } else {
+          setErr(error.message);
+          setSaving(false);
+          return;
+        }
       }
 
       window.location.href = '/plants';
@@ -81,7 +97,7 @@ function NewPlantInner() {
         </div>
 
         <div>
-          <label className="mb-1 block text-sm">Start date</label>
+          <label className="mb-1 block text-sm">Plant Date</label>
           <input
             className="w-full rounded border p-2"
             type="date"
@@ -92,7 +108,7 @@ function NewPlantInner() {
         </div>
 
         <div>
-          <label className="mb-1 block text-sm">Stage</label>
+          <label className="mb-1 block text-sm">Growth Stage</label>
           <select
             className="w-full rounded border p-2"
             value={stage}
@@ -107,12 +123,22 @@ function NewPlantInner() {
         </div>
 
         <div>
-          <label className="mb-1 block text-sm">Strain (optional)</label>
+          <label className="mb-1 block text-sm">Lineage (optional)</label>
           <input
             className="w-full rounded border p-2"
-            value={strain}
-            onChange={(e) => setStrain(e.target.value)}
-            placeholder="e.g., Blue Dream"
+            value={lineage}
+            onChange={(e) => setLineage(e.target.value)}
+            placeholder="e.g., (OG Kush × GSC)"
+          />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm">Breeder (optional)</label>
+          <input
+            className="w-full rounded border p-2"
+            value={breeder}
+            onChange={(e) => setBreeder(e.target.value)}
+            placeholder="e.g., Humboldt Seed Co."
           />
         </div>
 

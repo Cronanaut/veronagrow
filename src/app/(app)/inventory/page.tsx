@@ -13,7 +13,19 @@ type ItemRow = {
   unit_cost: number | null;
   qty: number | null;
   category: string | null;
+  is_persistent: boolean | null;
 };
+
+function formatQty(qty: number | null, isPersistent?: boolean | null): string {
+  if (isPersistent) return '∞';
+  if (qty == null) return '0';
+  const num = Number(qty);
+  if (!Number.isFinite(num)) return '∞';
+  return num.toLocaleString('en-US', {
+    minimumFractionDigits: num % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+}
 
 export default function InventoryListPage() {
   const [items, setItems] = useState<ItemRow[] | null>(null);
@@ -34,7 +46,7 @@ export default function InventoryListPage() {
 
         const { data, error } = await supabase
           .from('inventory_items')
-          .select('id,name,unit,unit_cost,qty,category')
+          .select('id,name,unit,unit_cost,qty,category,is_persistent')
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -100,7 +112,7 @@ export default function InventoryListPage() {
                       {it.name || '(untitled)'}
                     </Link>
                   </td>
-                  <td className="px-4 py-2">{it.qty ?? 0}</td>
+                  <td className="px-4 py-2">{formatQty(it.qty, it.is_persistent)}</td>
                   <td className="px-4 py-2">{it.unit ?? ''}</td>
                   <td className="px-4 py-2">
                     {it.unit_cost != null ? `$${it.unit_cost.toFixed(2)}` : '-'}
