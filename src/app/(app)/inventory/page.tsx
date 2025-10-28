@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { supabase } from '@/utils/supabase';
 import RequireAuth from '@/components/RequireAuth';
+import { ensureWaterItem } from '@/utils/ensure-water-item';
 
 type ItemRow = {
   id: string;
@@ -43,6 +44,8 @@ export default function InventoryListPage() {
           setLoading(false);
           return;
         }
+
+        await ensureWaterItem(userData.user.id);
 
         const { data, error } = await supabase
           .from('inventory_items')

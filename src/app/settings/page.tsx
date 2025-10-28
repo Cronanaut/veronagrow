@@ -3,50 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
-async function ensureWaterItem(userId: string, unitCost: number) {
-  const unitCostSafe = Number.isFinite(unitCost) ? unitCost : 0;
-
-  const { data: existing, error: existingErr } = await supabase
-    .from('inventory_items')
-    .select('id, is_persistent')
-    .eq('user_id', userId)
-    .eq('name', 'Water')
-    .maybeSingle();
-
-  if (existingErr) {
-    console.error('Failed to fetch Water inventory item:', existingErr.message);
-    return;
-  }
-
-  if (!existing) {
-    const { error: insertErr } = await supabase.from('inventory_items').insert({
-      user_id: userId,
-      name: 'Water',
-      unit: 'gal',
-      category: 'Water',
-      unit_cost: unitCostSafe,
-      is_persistent: true,
-    });
-    if (insertErr) {
-      console.error('Failed to insert Water inventory item:', insertErr.message);
-    }
-    return;
-  }
-
-  const { error: updateErr } = await supabase
-    .from('inventory_items')
-    .update({
-      unit_cost: unitCostSafe,
-      unit: 'gal',
-      category: 'Water',
-      is_persistent: true,
-    })
-    .eq('id', existing.id);
-
-  if (updateErr) {
-    console.error('Failed to update Water inventory item:', updateErr.message);
-  }
-}
+import { ensureWaterItem } from '@/utils/ensure-water-item';
 
 type UnitSystem = 'metric' | 'imperial';
 type TempUnit = 'C' | 'F';
@@ -95,7 +52,7 @@ export default function SettingsPage() {
       setElectricityCost(p?.electricity_cost_per_kwh ?? 0);
       setUnitSystem((p?.unit_system as UnitSystem) ?? 'metric');
       setTemperatureUnit((p?.temperature_unit as TempUnit) ?? 'C');
-      await ensureWaterItem(user.id, p?.water_cost_per_unit ?? 0);
+      await ensureWaterItem(user.id, p?.water_cost_per_unit ?? undefined);
     }
     setLoading(false);
   }, [router]);
