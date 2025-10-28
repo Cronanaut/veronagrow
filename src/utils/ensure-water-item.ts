@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { supabase } from '@/utils/supabase';
 
 function sanitizeUnitCost(unitCost: number | undefined): number | undefined {
@@ -6,10 +7,15 @@ function sanitizeUnitCost(unitCost: number | undefined): number | undefined {
   return unitCost;
 }
 
-export async function ensureWaterItem(userId: string, unitCost?: number) {
+export async function ensureWaterItem(
+  userId: string,
+  unitCost?: number,
+  client?: SupabaseClient
+) {
   const unitCostSafe = sanitizeUnitCost(unitCost);
+  const db = client ?? supabase;
 
-  const { data, error } = await supabase
+  const { data, error } = await db
     .from('inventory_items')
     .select('id, is_persistent')
     .eq('user_id', userId)
@@ -30,7 +36,7 @@ export async function ensureWaterItem(userId: string, unitCost?: number) {
       const dupId = dup.id;
       if (!dupId) continue;
 
-      const { error: demoteErr } = await supabase
+      const { error: demoteErr } = await db
         .from('inventory_items')
         .update({ is_persistent: false })
         .eq('id', dupId);
@@ -39,7 +45,7 @@ export async function ensureWaterItem(userId: string, unitCost?: number) {
         continue;
       }
 
-      const { error: deleteErr } = await supabase
+      const { error: deleteErr } = await db
         .from('inventory_items')
         .delete()
         .eq('id', dupId);
@@ -50,7 +56,7 @@ export async function ensureWaterItem(userId: string, unitCost?: number) {
   }
 
   if (!primary) {
-    const { error: insertErr } = await supabase.from('inventory_items').insert({
+    const { error: insertErr } = await db.from('inventory_items').insert({
       user_id: userId,
       name: 'Water',
       unit: 'gal',
@@ -73,7 +79,7 @@ export async function ensureWaterItem(userId: string, unitCost?: number) {
     updates.unit_cost = unitCostSafe;
   }
 
-  const { error: updateErr } = await supabase
+  const { error: updateErr } = await db
     .from('inventory_items')
     .update(updates)
     .eq('id', primary.id);

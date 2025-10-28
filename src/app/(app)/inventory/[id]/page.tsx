@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import createServerSupabase from '@/utils/supabase-server';
+import { ensureWaterItem } from '@/utils/ensure-water-item';
 import ItemForm, { type InventoryItem } from './ItemForm';
 import LotsCard, { type Lot } from './LotsCard';
 import RecordUsageForm from './RecordUsageForm';
@@ -88,12 +89,55 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
   const { id: itemId } = await params;
   const supabaseClient = createServerSupabase();
 
+  const {
+    data: userData,
+    error: userErr,
+  } = await supabaseClient.auth.getUser();
+
+  if (userErr) {
+    console.error('Failed to load user for inventory item page:', userErr.message);
+    redirect('/signin');
+  }
+
+  const user = userData?.user;
+  if (!user) {
+    redirect('/signin');
+  }
+
+  await ensureWaterItem(user.id, undefined, supabaseClient);
+
   // 1) Item
-  const { data: itemRow, error: itemErr } = await supabaseClient
+  let {
+    data: itemRow,
+    error: itemErr,
+  } = await supabaseClient
     .from('inventory_items')
     .select('id,name,unit,category,unit_cost,qty,is_persistent')
     .eq('id', itemId)
-    .single();
+    .maybeSingle();
+
+  if ((!itemRow || itemErr) && user) {
+    const {
+      data: fallbackRow,
+      error: fallbackErr,
+    } = await supabaseClient
+      .from('inventory_items')
+      .select('id,name,unit,category,unit_cost,qty,is_persistent')
+      .eq('user_id', user.id)
+      .eq('name', 'Water')
+      .order('created_at', { ascending: true })
+      .maybeSingle();
+
+    if (fallbackErr) {
+      console.error('Failed to load fallback Water item:', fallbackErr.message);
+    } else if (fallbackRow) {
+      if (fallbackRow.id !== itemId) {
+        redirect(`/inventory/${fallbackRow.id}`);
+      }
+      itemRow = fallbackRow;
+      itemErr = null;
+    }
+  }
 
   if (itemErr || !itemRow) return notFound();
 
