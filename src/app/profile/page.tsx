@@ -1,9 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 
 type ProfileRow = {
   username: string | null;
@@ -22,10 +21,12 @@ export default function ProfilePage() {
   const [username, setUsername] = useState<string>('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [bio, setBio] = useState<string>('');
+  const mountedRef = useRef(true);
 
   const load = useCallback(async () => {
     setError(null);
     const { data: ures, error: uerr } = await supabase.auth.getUser();
+    if (!mountedRef.current) return;
     if (uerr) {
       setError(uerr.message);
       setLoading(false);
@@ -43,19 +44,19 @@ export default function ProfilePage() {
       .eq('id', user.id)
       .maybeSingle<ProfileRow>();
 
+    if (!mountedRef.current) return;
     if (error) setError(error.message);
     else {
       setUsername(data?.username ?? '');
       setAvatarUrl(data?.avatar_url ?? null);
       setBio(data?.bio ?? '');
     }
-    setLoading(false);
+    if (mountedRef.current) setLoading(false);
   }, [router]);
 
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
     (async () => {
-      if (!mounted) return;
       await load();
     })();
     const {
@@ -64,7 +65,7 @@ export default function ProfilePage() {
       if (!session?.user) router.push('/signin');
     });
     return () => {
-      mounted = false;
+      mountedRef.current = false;
       subscription?.unsubscribe();
     };
   }, [load, router]);
@@ -75,7 +76,12 @@ export default function ProfilePage() {
     setError(null);
     setOk(null);
     try {
-      const { data: ures } = await supabase.auth.getUser();
+      const { data: ures, error: uerr } = await supabase.auth.getUser();
+      if (!mountedRef.current) return;
+      if (uerr) {
+        setError(uerr.message);
+        return;
+      }
       const uid = ures.user?.id;
       if (!uid) {
         router.push('/signin');
@@ -87,10 +93,11 @@ export default function ProfilePage() {
           { id: uid, username: username || null, avatar_url: avatarUrl, bio: bio || null },
           { onConflict: 'id' }
         );
+      if (!mountedRef.current) return;
       if (error) setError(error.message);
       else setOk('Profile saved.');
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
     }
   }
 
@@ -107,7 +114,12 @@ export default function ProfilePage() {
       return;
     }
 
-    const { data: ures } = await supabase.auth.getUser();
+    const { data: ures, error: uerr } = await supabase.auth.getUser();
+    if (!mountedRef.current) return;
+    if (uerr) {
+      setError(uerr.message);
+      return;
+    }
     const uid = ures.user?.id;
     if (!uid) {
       router.push('/signin');
@@ -124,12 +136,14 @@ export default function ProfilePage() {
       .upload(path, file, { upsert: true });
 
     if (upErr) {
+      if (!mountedRef.current) return;
       setError(upErr.message);
       return;
     }
 
     // Get a public URL for the file
     const { data } = supabase.storage.from('avatars').getPublicUrl(path);
+    if (!mountedRef.current) return;
     setAvatarUrl(data.publicUrl);
     setOk('Avatar uploaded. Don’t forget to Save.');
   }
