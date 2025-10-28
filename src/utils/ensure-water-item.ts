@@ -20,7 +20,7 @@ export async function ensureWaterItem(
     .select('id, is_persistent')
     .eq('user_id', userId)
     .eq('name', 'Water')
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: false });
 
   if (error) {
     console.error('Failed to look up Water inventory item:', error.message);
