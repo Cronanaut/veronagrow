@@ -9,19 +9,47 @@ function sanitizeUnitCost(unitCost: number | undefined): number | undefined {
 export async function ensureWaterItem(userId: string, unitCost?: number) {
   const unitCostSafe = sanitizeUnitCost(unitCost);
 
-  const { data: existing, error: existingErr } = await supabase
+  const { data, error } = await supabase
     .from('inventory_items')
     .select('id, is_persistent')
     .eq('user_id', userId)
     .eq('name', 'Water')
-    .maybeSingle();
+    .order('created_at', { ascending: true });
 
-  if (existingErr) {
-    console.error('Failed to fetch Water inventory item:', existingErr.message);
+  if (error) {
+    console.error('Failed to look up Water inventory item:', error.message);
     return;
   }
 
-  if (!existing) {
+  const rows = data ?? [];
+  const [primary, ...duplicates] = rows;
+
+  // Clean up any duplicates that slipped through
+  if (duplicates.length > 0) {
+    for (const dup of duplicates) {
+      const dupId = dup.id;
+      if (!dupId) continue;
+
+      const { error: demoteErr } = await supabase
+        .from('inventory_items')
+        .update({ is_persistent: false })
+        .eq('id', dupId);
+      if (demoteErr) {
+        console.error('Failed to demote duplicate Water item:', demoteErr.message);
+        continue;
+      }
+
+      const { error: deleteErr } = await supabase
+        .from('inventory_items')
+        .delete()
+        .eq('id', dupId);
+      if (deleteErr) {
+        console.error('Failed to delete duplicate Water item:', deleteErr.message);
+      }
+    }
+  }
+
+  if (!primary) {
     const { error: insertErr } = await supabase.from('inventory_items').insert({
       user_id: userId,
       name: 'Water',
@@ -48,7 +76,7 @@ export async function ensureWaterItem(userId: string, unitCost?: number) {
   const { error: updateErr } = await supabase
     .from('inventory_items')
     .update(updates)
-    .eq('id', existing.id);
+    .eq('id', primary.id);
 
   if (updateErr) {
     console.error('Failed to update Water inventory item:', updateErr.message);
