@@ -84,8 +84,8 @@ type UsageNorm = {
 };
 
 // ---------------------- Page (server) ---------------------------
-export default async function InventoryItemPage({ params }: { params: { id: string } }) {
-  const itemId = params.id;
+export default async function InventoryItemPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: itemId } = await params;
   const supabaseClient = createServerSupabase();
 
   // 1) Item
