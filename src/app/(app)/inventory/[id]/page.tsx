@@ -125,7 +125,7 @@ export default async function InventoryItemPage({ params }: { params: Promise<{ 
       .select('id,name,unit,category,unit_cost,qty,is_persistent')
       .eq('user_id', user.id)
       .eq('name', 'Water')
-      .order('created_at', { ascending: true })
+      .order('created_at', { ascending: false })
       .maybeSingle();
 
     if (fallbackErr) {

@@ -12,8 +12,23 @@ export async function ensureWaterItem(
   unitCost?: number,
   client?: SupabaseClient
 ) {
-  const unitCostSafe = sanitizeUnitCost(unitCost);
   const db = client ?? supabase;
+
+  let resolvedUnitCost = sanitizeUnitCost(unitCost);
+
+  if (resolvedUnitCost === undefined) {
+    const { data: profile, error: profileErr } = await db
+      .from('profiles')
+      .select('water_cost_per_unit')
+      .eq('id', userId)
+      .maybeSingle();
+
+    if (profileErr) {
+      console.error('Failed to load profile water cost:', profileErr.message);
+    } else if (profile) {
+      resolvedUnitCost = sanitizeUnitCost(profile.water_cost_per_unit ?? undefined);
+    }
+  }
 
   const { data, error } = await db
     .from('inventory_items')
@@ -61,7 +76,7 @@ export async function ensureWaterItem(
       name: 'Water',
       unit: 'gal',
       category: 'Water',
-      unit_cost: unitCostSafe ?? 0,
+      unit_cost: resolvedUnitCost ?? 0,
       is_persistent: true,
     });
     if (insertErr) {
@@ -75,8 +90,8 @@ export async function ensureWaterItem(
     category: 'Water',
     is_persistent: true,
   };
-  if (unitCostSafe !== undefined) {
-    updates.unit_cost = unitCostSafe;
+  if (resolvedUnitCost !== undefined) {
+    updates.unit_cost = resolvedUnitCost;
   }
 
   const { error: updateErr } = await db
