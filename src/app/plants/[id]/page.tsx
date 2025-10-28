@@ -112,7 +112,7 @@ function PlantDetailsInner() {
           }
           data = (fallback.data as Record<string, unknown> | null) ?? null;
           if (data) {
-            (data as any).breeder = null;
+            data = { ...data, breeder: null };
           }
         } else {
           setErr(error.message);

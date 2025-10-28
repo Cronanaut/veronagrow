@@ -46,7 +46,7 @@ function PlantsInner() {
 
       const { data, error } = await baseQuery;
 
-      let result: any[] | null = (data ?? null) as any[] | null;
+      let result: unknown[] = Array.isArray(data) ? data : [];
       if (error) {
         const msg = error.message?.toLowerCase() ?? '';
         if (msg.includes('breeder')) {
@@ -59,7 +59,7 @@ function PlantsInner() {
             setLoading(false);
             return;
           }
-          result = (fallback.data ?? null) as any[] | null;
+          result = Array.isArray(fallback.data) ? fallback.data : [];
         } else {
           setErr(error.message);
           setLoading(false);
@@ -67,17 +67,9 @@ function PlantsInner() {
         }
       }
 
-      const mapped = (result ?? []).map((row: any) => ({
-        id: row.id as string,
-        name: row.name as string,
-        stage: (row.stage as string | null) ?? null,
-        start_date: row.start_date as string,
-        lineage: (row.strain as string | null) ?? null,
-        breeder: (row.breeder as string | null) ?? null,
-        harvested_at: (row.harvested_at as string | null) ?? null,
-        yield_bud: row.yield_bud != null ? Number(row.yield_bud) : null,
-        yield_trim: row.yield_trim != null ? Number(row.yield_trim) : null,
-      })) as Batch[];
+      const mapped = result
+        .map(parseRow)
+        .filter((row): row is Batch => row !== null);
       setRows(mapped);
       setLoading(false);
     })();
@@ -166,4 +158,31 @@ function formatStage(stage: string | null) {
 function formatYield(value: number | null | undefined) {
   if (value == null) return '—';
   return Number(value).toLocaleString('en-US', { maximumFractionDigits: 2 });
+}
+
+function parseRow(value: unknown): Batch | null {
+  if (!value || typeof value !== 'object') return null;
+  const record = value as Record<string, unknown>;
+  const { id, name, stage, start_date, strain, breeder, harvested_at, yield_bud, yield_trim } = record;
+  if (typeof id !== 'string') return null;
+  if (typeof start_date !== 'string') return null;
+
+  return {
+    id,
+    name: typeof name === 'string' ? name : String(name ?? ''),
+    stage: typeof stage === 'string' ? stage : null,
+    start_date,
+    lineage: typeof strain === 'string' ? strain : null,
+    breeder: typeof breeder === 'string' ? breeder : null,
+    harvested_at: typeof harvested_at === 'string' ? harvested_at : null,
+    yield_bud: normalizeNumber(yield_bud),
+    yield_trim: normalizeNumber(yield_trim),
+  };
+}
+
+function normalizeNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }

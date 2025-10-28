@@ -4,8 +4,6 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
-
 export default function Nav() {
   const router = useRouter();
   const pathname = usePathname();

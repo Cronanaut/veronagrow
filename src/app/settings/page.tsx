@@ -3,8 +3,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
-
 async function ensureWaterItem(userId: string, unitCost: number) {
   const unitCostSafe = Number.isFinite(unitCost) ? unitCost : 0;
 

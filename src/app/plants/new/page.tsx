@@ -57,8 +57,13 @@ function NewPlantInner() {
       if (error) {
         const msg = error.message?.toLowerCase() ?? '';
         if (msg.includes('breeder')) {
-          const fallbackPayload = { ...payload } as any;
-          delete fallbackPayload.breeder;
+          const fallbackPayload = {
+            user_id: payload.user_id,
+            name: payload.name,
+            start_date: payload.start_date,
+            stage: payload.stage,
+            strain: payload.strain,
+          };
           const { error: fallbackErr } = await supabase
             .from('plant_batches')
             .insert(fallbackPayload);

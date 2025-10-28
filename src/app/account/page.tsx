@@ -3,8 +3,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/utils/supabase';
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
-
 type Profile = {
   username: string | null;
 };
